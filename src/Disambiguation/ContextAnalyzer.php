@@ -54,8 +54,10 @@ class ContextAnalyzer
     
     private function extractDateRange(string $query): array
     {
-        // Use the sophisticated DatePhraseParser
-        $parsed = \Venmail\SemanticSearch\Parsing\DatePhraseParser::parse($query);
+        // Use the sophisticated MultilingualDatePhraseParser
+        $localeManager = app(\Venmail\SemanticSearch\Core\LocaleManager::class);
+        $locale = $localeManager->getCurrentLocale();
+        $parsed = \Venmail\SemanticSearch\Parsing\MultilingualDatePhraseParser::parse($query, $locale);
         
         if ($parsed) {
             return $parsed;

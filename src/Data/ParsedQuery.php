@@ -10,6 +10,9 @@ class ParsedQuery
     public array $actions;
     public array $filters;
     public array $relationships;
+    public array $aggregations;
+    public ?string $booleanOperator; // AND, OR
+    public ?string $locale;
     
     public function __construct(
         string $original,
@@ -17,7 +20,10 @@ class ParsedQuery
         array $entities = [],
         array $actions = [],
         array $filters = [],
-        array $relationships = []
+        array $relationships = [],
+        array $aggregations = [],
+        ?string $booleanOperator = 'AND',
+        ?string $locale = null
     ) {
         $this->original = $original;
         $this->tokens = $tokens;
@@ -25,6 +31,9 @@ class ParsedQuery
         $this->actions = $actions;
         $this->filters = $filters;
         $this->relationships = $relationships;
+        $this->aggregations = $aggregations;
+        $this->booleanOperator = $booleanOperator;
+        $this->locale = $locale;
     }
     
     public function getOriginal(): string
@@ -57,6 +66,11 @@ class ParsedQuery
         return $this->relationships;
     }
     
+    public function getLocale(): ?string
+    {
+        return $this->locale;
+    }
+    
     public function hasEntities(): bool
     {
         return !empty($this->entities);
@@ -71,5 +85,21 @@ class ParsedQuery
     {
         return !empty($this->relationships);
     }
+    
+    public function getAggregations(): array
+    {
+        return $this->aggregations;
+    }
+    
+    public function hasAggregations(): bool
+    {
+        return !empty($this->aggregations);
+    }
+    
+    public function getBooleanOperator(): ?string
+    {
+        return $this->booleanOperator;
+    }
 }
+
 

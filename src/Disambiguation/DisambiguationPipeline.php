@@ -57,10 +57,51 @@ class DisambiguationPipeline
         // Determine if parseable
         $parseable = $overallConfidence >= $this->confidenceThreshold;
         
+        // Layer 4: LLM fallback if still unparseable
+        if (!$parseable && config('semantic-search.llm.enabled', false)) {
+            try {
+                // Get metadata from SearchEngine or create new instance
+                $metadata = null;
+                try {
+                    $searchEngine = app(\Venmail\SemanticSearch\Core\SearchEngine::class);
+                    // Use reflection to access private metadata property
+                    $reflection = new \ReflectionClass($searchEngine);
+                    $metadataProperty = $reflection->getProperty('metadata');
+                    $metadataProperty->setAccessible(true);
+                    $metadata = $metadataProperty->getValue($searchEngine);
+                } catch (\Throwable $e) {
+                    // Fallback: try to get from analyzer
+                    $analyzer = app(\Venmail\SemanticSearch\Core\ProjectAnalyzer::class);
+                    $metadata = $analyzer->analyze();
+                }
+                
+                if ($metadata) {
+                    $llmAdapter = new \Venmail\SemanticSearch\Disambiguation\LLMFallbackAdapter($metadata);
+                    $llmResult = $llmAdapter->process($corrected);
+                    
+                    if ($llmResult->isParseable()) {
+                        return $llmResult;
+                    }
+                    
+                    // If LLM also fails, merge suggestions
+                    $suggestions = array_merge(
+                        $this->generateSuggestions($corrected, $contextResult),
+                        $llmResult->getSuggestions()
+                    );
+                }
+            } catch (\Throwable $e) {
+                // Log but don't fail - continue with static disambiguation
+                \Illuminate\Support\Facades\Log::warning('LLM fallback error', [
+                    'error' => $e->getMessage(),
+                    'query' => $corrected
+                ]);
+            }
+        }
+        
         // Generate suggestions if low confidence
-        $suggestions = [];
+        $suggestions = $suggestions ?? [];
         if (!$parseable || $overallConfidence < 0.7) {
-            $suggestions = $this->generateSuggestions($corrected, $contextResult);
+            $suggestions = array_merge($suggestions, $this->generateSuggestions($corrected, $contextResult));
         }
         
         $processingTime = microtime(true) - $startTime;
@@ -71,7 +112,7 @@ class DisambiguationPipeline
             confidence: $overallConfidence,
             parseable: $parseable,
             failureReason: $parseable ? null : 'Low confidence score',
-            suggestions: $suggestions,
+            suggestions: array_slice(array_unique($suggestions), 0, 5),
             source: 'disambiguation_pipeline',
             processingTime: $processingTime
         );

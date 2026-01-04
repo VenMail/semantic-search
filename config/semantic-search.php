@@ -36,6 +36,7 @@ return [
         'api_key' => env('OPENAI_API_KEY'),
         'timeout' => env('SEMANTIC_SEARCH_LLM_TIMEOUT', 10),
         'confidence_threshold' => env('SEMANTIC_SEARCH_LLM_CONFIDENCE', 0.7),
+        'cache_ttl' => env('SEMANTIC_SEARCH_LLM_CACHE_TTL', 3600),
     ],
 
     'security' => [
@@ -52,6 +53,12 @@ return [
             'max_distance' => env('SEMANTIC_SEARCH_SPELLING_MAX_DISTANCE', 2),
             'min_confidence' => env('SEMANTIC_SEARCH_SPELLING_MIN_CONFIDENCE', 0.6),
         ],
+    ],
+
+    'locales' => [
+        'supported' => ['en', 'es', 'fr', 'de', 'pt'],
+        'default' => env('SEMANTIC_SEARCH_DEFAULT_LOCALE', 'en'),
+        'auto_detect' => env('SEMANTIC_SEARCH_AUTO_DETECT_LOCALE', true),
     ],
 
     'history' => [
