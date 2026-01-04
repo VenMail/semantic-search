@@ -10,8 +10,9 @@ use Venmail\SemanticSearch\Data\ParsedQuery;
 use Venmail\SemanticSearch\Data\ProjectMetadata;
 use Venmail\SemanticSearch\Data\SearchResult;
 use Venmail\SemanticSearch\History\QueryHistoryService;
-use Venmail\SemanticSearch\Parsing\QueryParser;
+use Venmail\SemanticSearch\Parsing\MultilingualQueryParser;
 use Venmail\SemanticSearch\Security\PolicyGate;
+use Venmail\SemanticSearch\Core\LocaleManager;
 
 class SearchEngine
 {
@@ -22,6 +23,7 @@ class SearchEngine
     private Cache $cacheRepository;
     private PolicyGate $policyGate;
     private QueryHistoryService $historyService;
+    private LocaleManager $localeManager;
     private ?ProjectMetadata $metadata = null;
     private ?Vocabulary $vocabulary = null;
     
@@ -32,7 +34,8 @@ class SearchEngine
         CacheAdapter $cache,
         Cache $cacheRepository,
         PolicyGate $policyGate,
-        QueryHistoryService $historyService
+        QueryHistoryService $historyService,
+        LocaleManager $localeManager
     ) {
         $this->analyzer = $analyzer;
         $this->queryBuilder = $queryBuilder;
@@ -41,6 +44,7 @@ class SearchEngine
         $this->cacheRepository = $cacheRepository;
         $this->policyGate = $policyGate;
         $this->historyService = $historyService;
+        $this->localeManager = $localeManager;
     }
     
     public function search(string $query, array $options = []): SearchResult
@@ -100,14 +104,30 @@ class SearchEngine
             }
         }
         
-        // Parse query
-        $parser = new QueryParser($vocabulary);
-        $parsedQuery = $parser->parse($query);
+        // Parse query using multilingual parser or LLM result
+        $locale = $options['locale'] ?? $this->localeManager->getCurrentLocale();
         
-        // Enhance parsed query with disambiguation
-        if ($disambiguationResult && config('semantic-search.disambiguation.enabled', true)) {
-            $disambiguationPipeline = app(\Venmail\SemanticSearch\Disambiguation\DisambiguationPipeline::class);
-            $parsedQuery = $disambiguationPipeline->enhanceParsedQuery($parsedQuery);
+        $parsedQuery = null;
+        
+        // If LLM provided parsed data, use it
+        if ($disambiguationResult && $disambiguationResult->getSource() === 'llm_fallback') {
+            $llmData = $disambiguationResult->getLlmParsedData();
+            if ($llmData && !empty($llmData)) {
+                $llmAdapter = new \Venmail\SemanticSearch\Disambiguation\LLMFallbackAdapter($metadata);
+                $parsedQuery = $llmAdapter->parseToParsedQuery($query, $llmData);
+            }
+        }
+        
+        // Fallback to standard parser
+        if (!$parsedQuery) {
+            $parser = new MultilingualQueryParser($this->localeManager, $vocabulary);
+            $parsedQuery = $parser->parse($query, $locale);
+            
+            // Enhance parsed query with disambiguation
+            if ($disambiguationResult && config('semantic-search.disambiguation.enabled', true)) {
+                $disambiguationPipeline = app(\Venmail\SemanticSearch\Disambiguation\DisambiguationPipeline::class);
+                $parsedQuery = $disambiguationPipeline->enhanceParsedQuery($parsedQuery);
+            }
         }
         
         // Validate query

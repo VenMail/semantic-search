@@ -12,6 +12,7 @@ class DisambiguationResult
     private array $suggestions;
     private string $source;
     private float $processingTime;
+    private ?array $llmParsedData;
     
     public function __construct(
         string $originalQuery,
@@ -21,7 +22,8 @@ class DisambiguationResult
         ?string $failureReason = null,
         array $suggestions = [],
         string $source = 'static',
-        float $processingTime = 0.0
+        float $processingTime = 0.0,
+        ?array $llmParsedData = null
     ) {
         $this->originalQuery = $originalQuery;
         $this->correctedQuery = $correctedQuery ?: $originalQuery;
@@ -31,6 +33,7 @@ class DisambiguationResult
         $this->suggestions = $suggestions;
         $this->source = $source;
         $this->processingTime = $processingTime;
+        $this->llmParsedData = $llmParsedData;
     }
     
     public function getOriginalQuery(): string
@@ -77,5 +80,11 @@ class DisambiguationResult
     {
         return $this->confidence < 0.6 && !empty($this->suggestions);
     }
+    
+    public function getLlmParsedData(): ?array
+    {
+        return $this->llmParsedData;
+    }
 }
+
 

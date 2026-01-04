@@ -9,19 +9,22 @@ class Filter
     public mixed $value;
     public ?string $mapping;
     public float $confidence;
+    public ?string $locale;
     
     public function __construct(
         string $field,
         string $operator,
         mixed $value,
         ?string $mapping = null,
-        float $confidence = 1.0
+        float $confidence = 1.0,
+        ?string $locale = null
     ) {
         $this->field = $field;
         $this->operator = $operator;
         $this->value = $value;
         $this->mapping = $mapping;
         $this->confidence = $confidence;
+        $this->locale = $locale;
     }
     
     public function getField(): string
@@ -48,5 +51,11 @@ class Filter
     {
         return $this->confidence;
     }
+    
+    public function getLocale(): ?string
+    {
+        return $this->locale;
+    }
 }
+
 

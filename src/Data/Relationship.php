@@ -9,19 +9,22 @@ class Relationship
     public ?string $mapping;
     public ?string $type;
     public float $confidence;
+    public ?string $locale;
     
     public function __construct(
         string $from,
         string $to,
         ?string $mapping = null,
         ?string $type = null,
-        float $confidence = 1.0
+        float $confidence = 1.0,
+        ?string $locale = null
     ) {
         $this->from = $from;
         $this->to = $to;
         $this->mapping = $mapping;
         $this->type = $type;
         $this->confidence = $confidence;
+        $this->locale = $locale;
     }
     
     public function getFrom(): string
@@ -48,5 +51,11 @@ class Relationship
     {
         return $this->confidence;
     }
+    
+    public function getLocale(): ?string
+    {
+        return $this->locale;
+    }
 }
+
 

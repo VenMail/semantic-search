@@ -7,6 +7,7 @@ use Illuminate\Support\ServiceProvider;
 use Venmail\SemanticSearch\Adapters\CacheAdapter;
 use Venmail\SemanticSearch\Core\ContextualQueryBuilder;
 use Venmail\SemanticSearch\Core\DynamicVocabularyBuilder;
+use Venmail\SemanticSearch\Core\LocaleManager;
 use Venmail\SemanticSearch\Core\ProjectAnalyzer;
 use Venmail\SemanticSearch\Core\SearchEngine;
 
@@ -15,6 +16,9 @@ class SemanticSearchServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/semantic-search.php', 'semantic-search');
+
+        // Register LocaleManager
+        $this->app->singleton(LocaleManager::class);
 
         // Register CacheAdapter
         $this->app->singleton(CacheAdapter::class, function ($app) {
@@ -92,7 +96,8 @@ class SemanticSearchServiceProvider extends ServiceProvider
                 $app->make(CacheAdapter::class),
                 $app->make(Cache::class),
                 $app->make(\Venmail\SemanticSearch\Security\PolicyGate::class),
-                $app->make(\Venmail\SemanticSearch\History\QueryHistoryService::class)
+                $app->make(\Venmail\SemanticSearch\History\QueryHistoryService::class),
+                $app->make(LocaleManager::class)
             );
         });
 

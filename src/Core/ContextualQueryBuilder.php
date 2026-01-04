@@ -45,6 +45,11 @@ class ContextualQueryBuilder
         // Apply relationships (with intelligent mapping)
         $query = $this->applyRelationships($query, $parsedQuery, $metadata);
         
+        // Apply aggregations if present
+        if ($parsedQuery->hasAggregations()) {
+            $query = $this->applyAggregations($query, $parsedQuery, $metadata);
+        }
+        
         // Apply filters (with intelligent field resolution and index awareness)
         $query = $this->applyFilters($query, $parsedQuery, $metadata);
         
@@ -104,90 +109,9 @@ class ContextualQueryBuilder
             return $bIndexed <=> $aIndexed;
         });
         
-        // Apply grouped filters
-        foreach ($filterGroups as $field => $group) {
-            $resolved = $group['resolved'];
-            $filters = $group['filters'];
-            
-            // Handle date/datetime fields
-            if ($resolved->isDateType()) {
-                $dateFilters = $this->groupDateFilters($filters, $query->getModel(), $resolved);
-                if (!empty($dateFilters)) {
-                    if (isset($dateFilters['is_datetime']) && $dateFilters['is_datetime']) {
-                        $query->whereBetween($dateFilters['datetime_field'], [
-                            $dateFilters['from'],
-                            $dateFilters['to']
-                        ]);
-                    } elseif (isset($dateFilters['from']) && isset($dateFilters['to'])) {
-                        $query->whereBetween($field, [$dateFilters['from'], $dateFilters['to']]);
-                    } elseif (isset($dateFilters['from'])) {
-                        $query->where($field, '>=', $dateFilters['from']);
-                    } elseif (isset($dateFilters['to'])) {
-                        $query->where($field, '<=', $dateFilters['to']);
-                    }
-                    continue;
-                }
-            }
-            
-            // Handle time fields
-            if ($resolved->isTimeType()) {
-                $timeFilters = [];
-                foreach ($filters as $filter) {
-                    $timeFilters[] = $filter;
-                }
-                if (count($timeFilters) === 2) {
-                    $fromFilter = null;
-                    $toFilter = null;
-                    foreach ($timeFilters as $tf) {
-                        if ($tf->getOperator() === '>=' || $tf->getOperator() === '>') {
-                            $fromFilter = $tf;
-                        } elseif ($tf->getOperator() === '<=' || $tf->getOperator() === '<') {
-                            $toFilter = $tf;
-                        }
-                    }
-                    if ($fromFilter && $toFilter) {
-                        $query->whereBetween($field, [$fromFilter->getValue(), $toFilter->getValue()]);
-                        continue;
-                    }
-                }
-            }
-            
-            // Apply other filters with type-aware handling
-            foreach ($filters as $filter) {
-                $operator = $this->normalizeOperator($filter->getOperator());
-                $value = $this->normalizeValueByType($filter->getValue(), $resolved->getType());
-                
-                // Use indexed field for better performance
-                if ($resolved->isIndexed() && $operator === '=') {
-                    // Indexed equality - most efficient
-                    $query->where($field, '=', $value);
-                } else {
-                    // Apply operator
-                    switch ($operator) {
-                        case '>':
-                            $query->where($field, '>', $value);
-                            break;
-                        case '<':
-                            $query->where($field, '<', $value);
-                            break;
-                        case '>=':
-                            $query->where($field, '>=', $value);
-                            break;
-                        case '<=':
-                            $query->where($field, '<=', $value);
-                            break;
-                        case '!=':
-                        case '<>':
-                            $query->where($field, '!=', $value);
-                            break;
-                        case '=':
-                        default:
-                            $query->where($field, '=', $value);
-                            break;
-                    }
-                }
-            }
-        }
+        // Apply grouped filters with boolean logic support
+        $booleanOperator = $parsedQuery->getBooleanOperator() ?? 'AND';
+        $this->applyGroupedFilters($query, $filterGroups, $query->getModel(), $booleanOperator);
         
         return $query;
     }
@@ -421,6 +345,117 @@ class ContextualQueryBuilder
     }
     
     
+    private function applyGroupedFilters(Builder $query, array $filterGroups, Model $model, string $booleanOperator = 'AND'): void
+    {
+        // Apply filters based on boolean operator
+        if ($booleanOperator === 'OR' && count($filterGroups) > 1) {
+            $query->where(function ($q) use ($filterGroups, $model) {
+                $first = true;
+                foreach ($filterGroups as $field => $group) {
+                    if ($first) {
+                        $this->applyFilterGroup($q, $field, $group, $model);
+                        $first = false;
+                    } else {
+                        $q->orWhere(function ($subQ) use ($field, $group, $model) {
+                            $this->applyFilterGroup($subQ, $field, $group, $model);
+                        });
+                    }
+                }
+            });
+        } else {
+            // Default AND behavior
+            foreach ($filterGroups as $field => $group) {
+                $this->applyFilterGroup($query, $field, $group, $model);
+            }
+        }
+    }
+    
+    private function applyFilterGroup(Builder $query, string $field, array $group, Model $model): void
+    {
+        $resolved = $group['resolved'];
+        $filters = $group['filters'];
+        
+        // Handle date/datetime fields
+        if ($resolved->isDateType()) {
+            $dateFilters = $this->groupDateFilters($filters, $model, $resolved);
+            if (!empty($dateFilters)) {
+                if (isset($dateFilters['is_datetime']) && $dateFilters['is_datetime']) {
+                    $query->whereBetween($dateFilters['datetime_field'], [
+                        $dateFilters['from'],
+                        $dateFilters['to']
+                    ]);
+                } elseif (isset($dateFilters['from']) && isset($dateFilters['to'])) {
+                    $query->whereBetween($field, [$dateFilters['from'], $dateFilters['to']]);
+                } elseif (isset($dateFilters['from'])) {
+                    $query->where($field, '>=', $dateFilters['from']);
+                } elseif (isset($dateFilters['to'])) {
+                    $query->where($field, '<=', $dateFilters['to']);
+                }
+                return;
+            }
+        }
+        
+        // Handle time fields
+        if ($resolved->isTimeType()) {
+            $timeFilters = [];
+            foreach ($filters as $filter) {
+                $timeFilters[] = $filter;
+            }
+            if (count($timeFilters) === 2) {
+                $fromFilter = null;
+                $toFilter = null;
+                foreach ($timeFilters as $tf) {
+                    if ($tf->getOperator() === '>=' || $tf->getOperator() === '>') {
+                        $fromFilter = $tf;
+                    } elseif ($tf->getOperator() === '<=' || $tf->getOperator() === '<') {
+                        $toFilter = $tf;
+                    }
+                }
+                if ($fromFilter && $toFilter) {
+                    $query->whereBetween($field, [$fromFilter->getValue(), $toFilter->getValue()]);
+                    return;
+                }
+            }
+        }
+        
+        // Apply other filters with type-aware handling
+        foreach ($filters as $filter) {
+            $operator = $this->normalizeOperator($filter->getOperator());
+            $value = $this->normalizeValueByType($filter->getValue(), $resolved->getType());
+            
+            // Use indexed field for better performance
+            if ($resolved->isIndexed() && $operator === '=') {
+                // Indexed equality - most efficient
+                $query->where($field, '=', $value);
+            } else {
+                // Apply operator
+                switch ($operator) {
+                    case '>':
+                        $query->where($field, '>', $value);
+                        break;
+                    case '<':
+                        $query->where($field, '<', $value);
+                        break;
+                    case '>=':
+                        $query->where($field, '>=', $value);
+                        break;
+                    case '<=':
+                        $query->where($field, '<=', $value);
+                        break;
+                    case '!=':
+                    case '<>':
+                        $query->where($field, '!=', $value);
+                        break;
+                    case '=':
+                    default:
+                        $query->where($field, '=', $value);
+                        break;
+                }
+            }
+        }
+    }
+    }
+    
     private function normalizeOperator(string $operator): string
     {
         $normalized = strtolower(trim($operator));
@@ -492,86 +527,7 @@ class ContextualQueryBuilder
         });
         
         // Apply grouped filters
-        foreach ($filterGroups as $field => $group) {
-            $resolved = $group['resolved'];
-            $filters = $group['filters'];
-            
-            // Handle date/datetime fields
-            if ($resolved->isDateType()) {
-                $dateFilters = $this->groupDateFilters($filters, $relatedModel, $resolved);
-                if (!empty($dateFilters)) {
-                    if (isset($dateFilters['is_datetime']) && $dateFilters['is_datetime']) {
-                        $query->whereBetween($dateFilters['datetime_field'], [
-                            $dateFilters['from'],
-                            $dateFilters['to']
-                        ]);
-                    } elseif (isset($dateFilters['from']) && isset($dateFilters['to'])) {
-                        $query->whereBetween($field, [$dateFilters['from'], $dateFilters['to']]);
-                    } elseif (isset($dateFilters['from'])) {
-                        $query->where($field, '>=', $dateFilters['from']);
-                    } elseif (isset($dateFilters['to'])) {
-                        $query->where($field, '<=', $dateFilters['to']);
-                    }
-                    continue;
-                }
-            }
-            
-            // Handle time fields
-            if ($resolved->isTimeType()) {
-                $timeFilters = [];
-                foreach ($filters as $filter) {
-                    $timeFilters[] = $filter;
-                }
-                if (count($timeFilters) === 2) {
-                    $fromFilter = null;
-                    $toFilter = null;
-                    foreach ($timeFilters as $tf) {
-                        if ($tf->getOperator() === '>=' || $tf->getOperator() === '>') {
-                            $fromFilter = $tf;
-                        } elseif ($tf->getOperator() === '<=' || $tf->getOperator() === '<') {
-                            $toFilter = $tf;
-                        }
-                    }
-                    if ($fromFilter && $toFilter) {
-                        $query->whereBetween($field, [$fromFilter->getValue(), $toFilter->getValue()]);
-                        continue;
-                    }
-                }
-            }
-            
-            // Apply other filters with type-aware handling
-            foreach ($filters as $filter) {
-                $operator = $this->normalizeOperator($filter->getOperator());
-                $value = $this->normalizeValueByType($filter->getValue(), $resolved->getType());
-                
-                if ($resolved->isIndexed() && $operator === '=') {
-                    $query->where($field, '=', $value);
-                } else {
-                    switch ($operator) {
-                        case '>':
-                            $query->where($field, '>', $value);
-                            break;
-                        case '<':
-                            $query->where($field, '<', $value);
-                            break;
-                        case '>=':
-                            $query->where($field, '>=', $value);
-                            break;
-                        case '<=':
-                            $query->where($field, '<=', $value);
-                            break;
-                        case '!=':
-                        case '<>':
-                            $query->where($field, '!=', $value);
-                            break;
-                        case '=':
-                        default:
-                            $query->where($field, '=', $value);
-                            break;
-                    }
-                }
-            }
-        }
+        $this->applyGroupedFilters($query, $filterGroups, $relatedModel, 'AND');
     }
     
     private function extractFiltersForModel(array $filters, string $targetModelClass, ProjectMetadata $metadata): array
@@ -610,6 +566,157 @@ class ContextualQueryBuilder
         }
         
         return $modelFilters;
+    }
+    
+    private function applyAggregations(Builder $query, ParsedQuery $parsedQuery, ProjectMetadata $metadata): Builder
+    {
+        $aggregations = $parsedQuery->getAggregations();
+        $model = $query->getModel();
+        $table = $model->getTable();
+        $selects = [];
+        $groupByFields = [];
+        
+        foreach ($aggregations as $aggregation) {
+            $type = $aggregation->getType();
+            $field = $aggregation->getField();
+            $alias = $this->sanitizeAlias($aggregation->getAlias() ?? ($type . '_' . ($field ?? 'total')));
+            $groupBy = $aggregation->getGroupBy();
+            
+            // Collect GROUP BY fields
+            if ($groupBy) {
+                $resolved = $this->fieldResolver->resolveField(
+                    new \Venmail\SemanticSearch\Data\Filter($groupBy, '=', null),
+                    $model
+                );
+                if ($resolved) {
+                    $groupByFields[] = $resolved->getField();
+                } else {
+                    // Try snake_case
+                    $snakeField = \Illuminate\Support\Str::snake($groupBy);
+                    $resolved = $this->fieldResolver->resolveField(
+                        new \Venmail\SemanticSearch\Data\Filter($snakeField, '=', null),
+                        $model
+                    );
+                    if ($resolved) {
+                        $groupByFields[] = $resolved->getField();
+                    }
+                }
+            }
+            
+            switch ($type) {
+                case 'count':
+                    if ($field) {
+                        $resolved = $this->fieldResolver->resolveField(
+                            new \Venmail\SemanticSearch\Data\Filter($field, '=', null),
+                            $model
+                        );
+                        if ($resolved) {
+                            $actualField = $this->quoteIdentifier($resolved->getField(), $table);
+                            $selects[] = "COUNT({$actualField}) as `{$alias}`";
+                        } else {
+                            $selects[] = "COUNT(*) as `{$alias}`";
+                        }
+                    } else {
+                        // Count all records
+                        $selects[] = "COUNT(*) as `{$alias}`";
+                    }
+                    break;
+                    
+                case 'sum':
+                    if ($field) {
+                        $resolved = $this->fieldResolver->resolveField(
+                            new \Venmail\SemanticSearch\Data\Filter($field, '=', null),
+                            $model
+                        );
+                        if ($resolved) {
+                            $actualField = $this->quoteIdentifier($resolved->getField(), $table);
+                            $selects[] = "SUM({$actualField}) as `{$alias}`";
+                        }
+                    }
+                    break;
+                    
+                case 'avg':
+                case 'average':
+                    if ($field) {
+                        $resolved = $this->fieldResolver->resolveField(
+                            new \Venmail\SemanticSearch\Data\Filter($field, '=', null),
+                            $model
+                        );
+                        if ($resolved) {
+                            $actualField = $this->quoteIdentifier($resolved->getField(), $table);
+                            $selects[] = "AVG({$actualField}) as `{$alias}`";
+                        }
+                    }
+                    break;
+                    
+                case 'min':
+                    if ($field) {
+                        $resolved = $this->fieldResolver->resolveField(
+                            new \Venmail\SemanticSearch\Data\Filter($field, '=', null),
+                            $model
+                        );
+                        if ($resolved) {
+                            $actualField = $this->quoteIdentifier($resolved->getField(), $table);
+                            $selects[] = "MIN({$actualField}) as `{$alias}`";
+                        }
+                    }
+                    break;
+                    
+                case 'max':
+                    if ($field) {
+                        $resolved = $this->fieldResolver->resolveField(
+                            new \Venmail\SemanticSearch\Data\Filter($field, '=', null),
+                            $model
+                        );
+                        if ($resolved) {
+                            $actualField = $this->quoteIdentifier($resolved->getField(), $table);
+                            $selects[] = "MAX({$actualField}) as `{$alias}`";
+                        }
+                    }
+                    break;
+            }
+        }
+        
+        // Apply SELECT with aggregations
+        if (!empty($selects)) {
+            // If GROUP BY is used, include those fields in SELECT
+            if (!empty($groupByFields)) {
+                foreach ($groupByFields as $gbField) {
+                    $quotedField = $this->quoteIdentifier($gbField, $table);
+                    $selects[] = "{$quotedField}";
+                }
+            }
+            $query->selectRaw(implode(', ', $selects));
+        }
+        
+        // Apply GROUP BY
+        if (!empty($groupByFields)) {
+            $query->groupBy($groupByFields);
+        }
+        
+        return $query;
+    }
+    
+    private function quoteIdentifier(string $field, string $table): string
+    {
+        // Sanitize field name to prevent SQL injection
+        // Only allow alphanumeric, underscore, and dot
+        if (!preg_match('/^[a-zA-Z0-9_\.]+$/', $field)) {
+            throw new \InvalidArgumentException("Invalid field name: {$field}");
+        }
+        
+        // If field contains dot, it's table.field format
+        if (str_contains($field, '.')) {
+            return "`{$field}`";
+        }
+        
+        return "`{$table}`.`{$field}`";
+    }
+    
+    private function sanitizeAlias(string $alias): string
+    {
+        // Remove any non-alphanumeric characters except underscore
+        return preg_replace('/[^a-zA-Z0-9_]/', '_', $alias);
     }
 }
 
