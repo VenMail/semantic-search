@@ -134,7 +134,8 @@ class SearchEngine
         $this->validateQuery($parsedQuery);
         
         // Authorize query (security check)
-        $this->policyGate->authorize($parsedQuery, $metadata, auth()->user());
+        $user = function_exists('auth') && auth()->check() ? auth()->user() : null;
+        $this->policyGate->authorize($parsedQuery, $metadata, $user);
         
         // Build and execute query
         try {
@@ -147,7 +148,8 @@ class SearchEngine
             // Store in query history
             if (config('semantic-search.history.enabled', true)) {
                 $resultType = $result->getMetadata()['type'] ?? 'list';
-                $this->historyService->store($query, auth()->user(), $resultType);
+                $user = function_exists('auth') && auth()->check() ? auth()->user() : null;
+                $this->historyService->store($query, $user, $resultType);
             }
             
             // Cache result
@@ -306,9 +308,25 @@ class SearchEngine
             ini_set('memory_limit', $memoryLimit);
         }
         
-        // Set database query timeout (MySQL specific) - set once before query execution
-        if (DB::getDriverName() === 'mysql') {
-            DB::statement("SET SESSION max_execution_time = {$maxQueryTime}");
+        // Set database query timeout (database-specific)
+        $driver = DB::getDriverName();
+        try {
+            switch ($driver) {
+                case 'mysql':
+                    DB::statement("SET SESSION max_execution_time = {$maxQueryTime}");
+                    break;
+                case 'pgsql':
+                    DB::statement("SET statement_timeout = {$maxQueryTime}000"); // PostgreSQL uses milliseconds
+                    break;
+                case 'sqlite':
+                    // SQLite doesn't support query timeout at connection level
+                    break;
+                default:
+                    // Unknown driver, skip timeout setting
+                    break;
+            }
+        } catch (\Throwable $e) {
+            // Ignore timeout setting errors - query will still execute
         }
         
         try {
@@ -365,12 +383,14 @@ class SearchEngine
     
     public function getHistory(int $limit = 20): array
     {
-        return $this->historyService->getHistory(auth()->user(), $limit);
+        $user = function_exists('auth') && auth()->check() ? auth()->user() : null;
+        return $this->historyService->getHistory($user, $limit);
     }
     
     public function getSuggestions(string $partialQuery, int $limit = 5): array
     {
-        return $this->historyService->getSuggestions($partialQuery, auth()->user(), $limit);
+        $user = function_exists('auth') && auth()->check() ? auth()->user() : null;
+        return $this->historyService->getSuggestions($partialQuery, $user, $limit);
     }
 }
 

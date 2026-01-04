@@ -5,11 +5,14 @@ namespace Venmail\SemanticSearch\Core;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
+use Venmail\SemanticSearch\Core\Database\SchemaAdapterFactory;
+use Venmail\SemanticSearch\Core\Database\AbstractSchemaAdapter;
 
 class SchemaAnalyzer
 {
     private const CACHE_PREFIX = 'semantic_search:schema:';
     private const CACHE_TTL = 14400; // 4 hours
+    private ?AbstractSchemaAdapter $adapter = null;
 
     /**
      * Get schema information for a model including columns, types, and indexes
@@ -41,28 +44,26 @@ class SchemaAnalyzer
     }
 
     /**
+     * Get database adapter
+     */
+    private function getAdapter(): AbstractSchemaAdapter
+    {
+        if ($this->adapter === null) {
+            $this->adapter = SchemaAdapterFactory::create();
+        }
+        return $this->adapter;
+    }
+    
+    /**
      * Get all columns for a table with their types
      */
     private function getTableColumns(string $table): array
     {
-        $cacheKey = self::CACHE_PREFIX . 'columns:' . md5($table);
+        $cacheKey = self::CACHE_PREFIX . 'columns:' . md5($table . DB::getDriverName());
         
         return Cache::remember($cacheKey, self::CACHE_TTL, function () use ($table) {
             try {
-                $columns = DB::select("SHOW COLUMNS FROM `{$table}`");
-                $result = [];
-                
-                foreach ($columns as $column) {
-                    $column = (array)$column;
-                    $result[$column['Field']] = [
-                        'type' => $this->normalizeColumnType($column['Type'] ?? ''),
-                        'nullable' => ($column['Null'] ?? '') === 'YES',
-                        'default' => $column['Default'] ?? null,
-                        'key' => $column['Key'] ?? '',
-                    ];
-                }
-                
-                return $result;
+                return $this->getAdapter()->getTableColumns($table);
             } catch (\Throwable $e) {
                 // Fallback: try to get from model if available
                 return [];
@@ -75,31 +76,11 @@ class SchemaAnalyzer
      */
     private function getTableIndexes(string $table): array
     {
-        $cacheKey = self::CACHE_PREFIX . 'indexes:' . md5($table);
+        $cacheKey = self::CACHE_PREFIX . 'indexes:' . md5($table . DB::getDriverName());
         
         return Cache::remember($cacheKey, self::CACHE_TTL, function () use ($table) {
             try {
-                $indexes = DB::select("SHOW INDEXES FROM `{$table}`");
-                $result = [];
-                
-                foreach ($indexes as $index) {
-                    $index = (array)$index;
-                    $indexName = $index['Key_name'] ?? '';
-                    $columnName = $index['Column_name'] ?? '';
-                    
-                    if (!isset($result[$indexName])) {
-                        $result[$indexName] = [
-                            'name' => $indexName,
-                            'type' => $index['Index_type'] ?? 'BTREE',
-                            'unique' => (int)($index['Non_unique'] ?? 1) === 0,
-                            'columns' => [],
-                        ];
-                    }
-                    
-                    $result[$indexName]['columns'][] = $columnName;
-                }
-                
-                return $result;
+                return $this->getAdapter()->getTableIndexes($table);
             } catch (\Throwable $e) {
                 return [];
             }
@@ -111,17 +92,11 @@ class SchemaAnalyzer
      */
     private function getPrimaryKey(string $table): ?string
     {
-        $cacheKey = self::CACHE_PREFIX . 'primary:' . md5($table);
+        $cacheKey = self::CACHE_PREFIX . 'primary:' . md5($table . DB::getDriverName());
         
         return Cache::remember($cacheKey, self::CACHE_TTL, function () use ($table) {
             try {
-                $indexes = $this->getTableIndexes($table);
-                foreach ($indexes as $index) {
-                    if ($index['name'] === 'PRIMARY') {
-                        return $index['columns'][0] ?? null;
-                    }
-                }
-                return null;
+                return $this->getAdapter()->getPrimaryKey($table);
             } catch (\Throwable $e) {
                 return null;
             }
@@ -133,37 +108,11 @@ class SchemaAnalyzer
      */
     private function getForeignKeys(string $table): array
     {
-        $cacheKey = self::CACHE_PREFIX . 'foreign:' . md5($table);
+        $cacheKey = self::CACHE_PREFIX . 'foreign:' . md5($table . DB::getDriverName());
         
         return Cache::remember($cacheKey, self::CACHE_TTL, function () use ($table) {
             try {
-                $connection = DB::connection();
-                $database = $connection->getDatabaseName();
-                
-                $foreignKeys = DB::select("
-                    SELECT 
-                        COLUMN_NAME,
-                        REFERENCED_TABLE_NAME,
-                        REFERENCED_COLUMN_NAME,
-                        CONSTRAINT_NAME
-                    FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
-                    WHERE TABLE_SCHEMA = ?
-                    AND TABLE_NAME = ?
-                    AND REFERENCED_TABLE_NAME IS NOT NULL
-                ", [$database, $table]);
-                
-                $result = [];
-                foreach ($foreignKeys as $fk) {
-                    $fk = (array)$fk;
-                    $result[$fk['COLUMN_NAME']] = [
-                        'column' => $fk['COLUMN_NAME'],
-                        'referenced_table' => $fk['REFERENCED_TABLE_NAME'],
-                        'referenced_column' => $fk['REFERENCED_COLUMN_NAME'],
-                        'constraint' => $fk['CONSTRAINT_NAME'],
-                    ];
-                }
-                
-                return $result;
+                return $this->getAdapter()->getForeignKeys($table);
             } catch (\Throwable $e) {
                 return [];
             }
@@ -256,38 +205,11 @@ class SchemaAnalyzer
     }
 
     /**
-     * Normalize MySQL column type to generic type
+     * Normalize column type to generic type (delegates to adapter)
      */
     private function normalizeColumnType(string $type): string
     {
-        $type = strtolower($type);
-        
-        if (str_contains($type, 'int')) {
-            return 'integer';
-        }
-        if (str_contains($type, 'decimal') || str_contains($type, 'float') || str_contains($type, 'double')) {
-            return 'decimal';
-        }
-        if (str_contains($type, 'date') && !str_contains($type, 'time')) {
-            return 'date';
-        }
-        if (str_contains($type, 'datetime') || str_contains($type, 'timestamp')) {
-            return 'datetime';
-        }
-        if (str_contains($type, 'time') && !str_contains($type, 'date') && !str_contains($type, 'stamp')) {
-            return 'time';
-        }
-        if (str_contains($type, 'text') || str_contains($type, 'varchar') || str_contains($type, 'char')) {
-            return 'string';
-        }
-        if (str_contains($type, 'bool') || str_contains($type, 'tinyint(1)')) {
-            return 'boolean';
-        }
-        if (str_contains($type, 'json')) {
-            return 'json';
-        }
-        
-        return 'string';
+        return $this->getAdapter()->normalizeColumnType($type);
     }
 
     /**
