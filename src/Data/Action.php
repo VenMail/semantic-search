@@ -1,0 +1,44 @@
+<?php
+
+namespace Venmail\SemanticSearch\Data;
+
+class Action
+{
+    public string $type;
+    public string $value;
+    public ?string $mapping;
+    public float $confidence;
+    
+    public function __construct(
+        string $type,
+        string $value,
+        ?string $mapping = null,
+        float $confidence = 1.0
+    ) {
+        $this->type = $type;
+        $this->value = $value;
+        $this->mapping = $mapping;
+        $this->confidence = $confidence;
+    }
+    
+    public function getType(): string
+    {
+        return $this->type;
+    }
+    
+    public function getValue(): string
+    {
+        return $this->value;
+    }
+    
+    public function getMapping(): ?string
+    {
+        return $this->mapping;
+    }
+    
+    public function getConfidence(): float
+    {
+        return $this->confidence;
+    }
+}
+
