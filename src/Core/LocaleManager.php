@@ -22,6 +22,11 @@ class LocaleManager
         return App::getLocale() ?? $this->defaultLocale;
     }
     
+    public function getDefaultLocale(): string
+    {
+        return $this->defaultLocale;
+    }
+    
     public function isSupported(string $locale): bool
     {
         return in_array($locale, $this->supportedLocales, true);
@@ -108,9 +113,15 @@ class LocaleManager
                     'this_month' => 'this month',
                     'last_year' => 'last year',
                     'this_year' => 'this year',
-                    'last_x_days' => '/last\s+(\d+)\s+days?/',
-                    'past_x_days' => '/past\s+(\d+)\s+days?/',
-                    'in_last_x_days' => '/in\s+the\s+last\s+(\d+)\s+days?/',
+                    'last_x_days' => ['regex' => '/last\s+(\d+)\s+days?/', 'unit' => 'days'],
+                    'past_x_days' => ['regex' => '/past\s+(\d+)\s+days?/', 'unit' => 'days'],
+                    'in_last_x_days' => ['regex' => '/in\s+the\s+last\s+(\d+)\s+days?/', 'unit' => 'days'],
+                    'last_x_weeks' => ['regex' => '/last\s+(\d+)\s+weeks?/', 'unit' => 'weeks'],
+                    'past_x_weeks' => ['regex' => '/past\s+(\d+)\s+weeks?/', 'unit' => 'weeks'],
+                    'last_x_months' => ['regex' => '/last\s+(\d+)\s+months?/', 'unit' => 'months'],
+                    'past_x_months' => ['regex' => '/past\s+(\d+)\s+months?/', 'unit' => 'months'],
+                    'last_x_years' => ['regex' => '/last\s+(\d+)\s+years?/', 'unit' => 'years'],
+                    'past_x_years' => ['regex' => '/past\s+(\d+)\s+years?/', 'unit' => 'years'],
                 ],
                 'quantifiers' => ['all', 'every', 'each', 'any', 'some', 'multiple', 'various'],
                 'stop_words' => ['the', 'a', 'an', 'of', 'in', 'on', 'at', 'for', 'to', 'from'],

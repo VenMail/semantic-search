@@ -61,6 +61,11 @@ class DynamicVocabularyBuilder
                     Str::snake($field),
                     Str::kebab($field),
                 ];
+
+                $synonyms = array_unique(array_merge(
+                    $synonyms,
+                    $this->generateSemanticSynonyms($fieldLower)
+                ));
                 
                 $vocabulary->addFieldMapping($modelClass, $field, $type, $synonyms);
             }
@@ -73,6 +78,11 @@ class DynamicVocabularyBuilder
                     Str::snake($computed),
                     Str::kebab($computed),
                 ];
+
+                $synonyms = array_unique(array_merge(
+                    $synonyms,
+                    $this->generateSemanticSynonyms($computedLower)
+                ));
                 
                 $vocabulary->addFieldMapping($modelClass, $computed, 'computed', $synonyms);
             }
@@ -166,6 +176,47 @@ class DynamicVocabularyBuilder
         }
         
         return null;
+    }
+
+    private function generateSemanticSynonyms(string $field): array
+    {
+        $synonyms = [];
+
+        if (str_contains($field, 'subject')) {
+            $synonyms = array_merge($synonyms, ['title', 'topic', 'headline', 'summary']);
+        }
+
+        if (str_contains($field, 'from') || str_contains($field, 'sender')) {
+            if (str_contains($field, 'email')) {
+                $synonyms = array_merge($synonyms, [
+                    'sender email',
+                    'from email',
+                    'sender address',
+                    'from address'
+                ]);
+            } else {
+                $synonyms = array_merge($synonyms, [
+                    'sender',
+                    'from name',
+                    'sender name'
+                ]);
+            }
+        }
+
+        if ($field === 'plain_body' || str_contains($field, 'body') || str_contains($field, 'content')) {
+            $synonyms = array_merge($synonyms, [
+                'content',
+                'contents',
+                'message',
+                'text'
+            ]);
+        }
+
+        if (str_contains($field, 'created_at') || str_contains($field, 'updated_at')) {
+            $synonyms = array_merge($synonyms, ['date', 'timestamp']);
+        }
+
+        return array_unique($synonyms);
     }
 }
 

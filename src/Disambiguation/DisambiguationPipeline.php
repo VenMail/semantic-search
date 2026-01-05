@@ -98,8 +98,12 @@ class DisambiguationPipeline
             }
         }
         
+        // Normalize suggestions collection
+        if (!isset($suggestions)) {
+            $suggestions = [];
+        }
+        
         // Generate suggestions if low confidence
-        $suggestions = $suggestions ?? [];
         if (!$parseable || $overallConfidence < 0.7) {
             $suggestions = array_merge($suggestions, $this->generateSuggestions($corrected, $contextResult));
         }
@@ -112,7 +116,7 @@ class DisambiguationPipeline
             confidence: $overallConfidence,
             parseable: $parseable,
             failureReason: $parseable ? null : 'Low confidence score',
-            suggestions: array_slice(array_unique($suggestions), 0, 5),
+            suggestions: array_slice($this->deduplicateSuggestions($suggestions), 0, 5),
             source: 'disambiguation_pipeline',
             processingTime: $processingTime
         );
@@ -224,6 +228,32 @@ class DisambiguationPipeline
         }
         
         return array_slice($suggestions, 0, 5); // Limit to 5 suggestions
+    }
+    
+    private function deduplicateSuggestions(array $suggestions): array
+    {
+        $unique = [];
+        $seen = [];
+        
+        foreach ($suggestions as $suggestion) {
+            $key = is_array($suggestion)
+                ? $this->buildSuggestionKey($suggestion)
+                : (is_scalar($suggestion) ? (string) $suggestion : md5(serialize($suggestion)));
+            
+            if (!isset($seen[$key])) {
+                $unique[] = $suggestion;
+                $seen[$key] = true;
+            }
+        }
+        
+        return $unique;
+    }
+    
+    private function buildSuggestionKey(array $suggestion): string
+    {
+        ksort($suggestion);
+        
+        return md5(json_encode($suggestion));
     }
 }
 

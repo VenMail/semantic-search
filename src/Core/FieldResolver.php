@@ -2,6 +2,7 @@
 
 namespace Venmail\SemanticSearch\Core;
 
+use Illuminate\Support\Facades\Log;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 use Venmail\SemanticSearch\Data\Filter;
@@ -29,6 +30,7 @@ class FieldResolver
     {
         $modelClass = get_class($model);
         $requestedField = $filter->getField();
+
         $overrideField = $this->getFieldOverride($modelClass, $requestedField);
         if ($overrideField) {
             $resolved = $this->resolveFieldName($overrideField, $model);
@@ -164,15 +166,27 @@ class FieldResolver
 
         if (preg_match_all('/return\s+(.*?);/s', $source, $returns)) {
             foreach ($returns[1] as $expr) {
+                // $this->attributes['field']
                 if (preg_match_all("/\$this->attributes\\[['\"]([A-Za-z0-9_]+)['\"]\\]/", $expr, $attrMatches)) {
                     foreach ($attrMatches[1] as $attr) {
                         $candidates[] = $attr;
                     }
                 }
 
+                // $this->field (where field is snake_case of column)
                 if (preg_match_all('/\$this->([A-Za-z0-9_]+)/', $expr, $propMatches)) {
                     foreach ($propMatches[1] as $prop) {
-                        $candidates[] = Str::snake($prop);
+                        // Avoid adding common non-column properties
+                        if (!in_array($prop, ['attributes', 'relations', 'exists', 'wasRecentlyCreated'])) {
+                            $candidates[] = Str::snake($prop);
+                        }
+                    }
+                }
+
+                // Ternary or other expressions containing field names in quotes
+                if (preg_match_all("/['\"]([A-Za-z0-9_]+)['\"]/", $expr, $quoteMatches)) {
+                    foreach ($quoteMatches[1] as $quote) {
+                        $candidates[] = $quote;
                     }
                 }
             }

@@ -2,6 +2,7 @@
 
 namespace Venmail\SemanticSearch\Core;
 
+use Illuminate\Support\Facades\Log;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Venmail\SemanticSearch\Core\FieldResolver;
@@ -26,6 +27,15 @@ class ContextualQueryBuilder
     {
         if (!$parsedQuery->hasEntities()) {
             throw new \InvalidArgumentException('Query must contain at least one entity');
+        }
+        
+        try {
+            Log::info('[ContextualQueryBuilder] Building query', [
+                'entities' => count($parsedQuery->getEntities()),
+                'filters' => count($parsedQuery->getFilters())
+            ]);
+        } catch (\Throwable $e) {
+            // Ignore logging errors
         }
         
         // Get primary entity
@@ -77,9 +87,27 @@ class ContextualQueryBuilder
     
     private function applyFilters(Builder $query, ParsedQuery $parsedQuery, ProjectMetadata $metadata): Builder
     {
+        try {
+            Log::info('[ContextualQueryBuilder] Applying filters', [
+                'filter_count' => count($parsedQuery->getFilters())
+            ]);
+        } catch (\Throwable $e) {
+            // Ignore logging errors
+        }
+        
         // Resolve all filters with intelligent field resolution
         $resolvedFilters = [];
         foreach ($parsedQuery->getFilters() as $filter) {
+            try {
+                Log::info('[ContextualQueryBuilder] Resolving filter', [
+                    'field' => $filter->getField(),
+                    'operator' => $filter->getOperator(),
+                    'value_type' => gettype($filter->getValue())
+                ]);
+            } catch (\Throwable $e) {
+                // Ignore logging errors
+            }
+            
             $resolved = $this->fieldResolver->resolveField($filter, $query->getModel());
             if ($resolved) {
                 $resolvedFilters[] = [
@@ -369,12 +397,12 @@ class ContextualQueryBuilder
             }
         }
     }
+
     private function applyFilterGroup(Builder $query, string $field, array $group, Model $model): void
     {
         $resolved = $group['resolved'];
         $filters = $group['filters'];
-        
-        // Handle date/datetime fields
+
         if ($resolved->isDateType()) {
             $dateFilters = $this->groupDateFilters($filters, $model, $resolved);
             if (!empty($dateFilters)) {
@@ -420,7 +448,13 @@ class ContextualQueryBuilder
         // Apply other filters with type-aware handling
         foreach ($filters as $filter) {
             $operator = $this->normalizeOperator($filter->getOperator());
-            $value = $this->normalizeValueByType($filter->getValue(), $resolved->getType());
+            $rawValue = $filter->getValue();
+            $value = $this->normalizeValueByType($rawValue, $resolved->getType());
+
+            // Prevent "Array to string conversion" error
+            if (is_array($value)) {
+                $value = implode(', ', array_map(fn($v) => is_scalar($v) ? (string)$v : json_encode($v), $value));
+            }
             
             // Interpret empty-string sentinels (used by quantifiers) as null checks
             if ($value === '' && in_array($operator, ['!=', '<>'], true)) {

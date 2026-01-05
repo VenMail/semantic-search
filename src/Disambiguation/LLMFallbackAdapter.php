@@ -283,9 +283,10 @@ PROMPT;
             if (!empty($relationships)) {
                 $relList = [];
                 foreach ($relationships as $relName => $relData) {
-                    $relList[] = "{$relName} ({$relData['type'] ?? 'unknown'})";
+                    $type = $relData['type'] ?? 'unknown';
+                    $relList[] = sprintf('%s (%s)', $relName, $type);
                 }
-                $context .= "  Relationships: " . implode(', ', $relList) . "\n";
+                $context .= '  Relationships: ' . implode(', ', $relList) . "\n";
             }
             
             // Add scopes

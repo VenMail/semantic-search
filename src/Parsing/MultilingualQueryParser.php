@@ -2,6 +2,7 @@
 
 namespace Venmail\SemanticSearch\Parsing;
 
+use Carbon\Carbon;
 use Illuminate\Support\Str;
 use Venmail\SemanticSearch\Core\LocaleManager;
 use Venmail\SemanticSearch\Core\Vocabulary;
@@ -24,6 +25,49 @@ class MultilingualQueryParser
         $this->vocabulary = $vocabulary;
         $this->loadComparators();
     }
+
+    private function sanitizeSenderValue(string $value): string
+    {
+        $value = trim($value, " \t\n\r\0\x0B\"'");
+        $value = preg_replace('/^from\s+/i', '', $value);
+        $value = preg_replace('/\s+emails?$/i', '', $value);
+
+        return trim($value);
+    }
+
+    private function inferSenderFieldCandidates(string $value): array
+    {
+        $candidates = ['sender_email', 'from_email', 'email', 'from'];
+
+        if (!$this->looksLikeEmail($value)) {
+            array_unshift($candidates, 'sender_name');
+            $candidates[] = 'display_name';
+        }
+
+        return array_values(array_unique($candidates));
+    }
+
+    private function looksLikeEmail(string $value): bool
+    {
+        return (bool) filter_var($value, FILTER_VALIDATE_EMAIL);
+    }
+
+    private function isComparatorToken(string $token): bool
+    {
+        $token = strtolower(trim($token));
+
+        if (in_array($token, $this->comparators, true)) {
+            return true;
+        }
+
+        foreach ($this->localeManager->getComparatorMapping($this->localeManager->getCurrentLocale()) as $variants) {
+            if (in_array($token, $variants, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
     
     public function parse(string $query, ?string $locale = null): ParsedQuery
     {
@@ -36,7 +80,7 @@ class MultilingualQueryParser
         $tokens = $this->tokenize($query, $locale);
         $entities = $this->extractEntities($tokens, $locale);
         $actions = $this->extractActions($tokens, $locale);
-        $filters = $this->extractFilters($tokens, $locale);
+        $filters = $this->extractFilters($tokens, $locale, $query);
         $relationships = $this->extractRelationships($tokens, $locale);
         $aggregations = $this->extractAggregations($tokens, $locale);
         $booleanOperator = $this->extractBooleanOperator($query, $locale);
@@ -116,19 +160,115 @@ class MultilingualQueryParser
         return $actions;
     }
     
-    private function extractFilters(array $tokens, string $locale): array
+    private function extractFilters(array $tokens, string $locale, string $originalQuery): array
     {
         $filters = [];
-        $query = implode(' ', $tokens);
-        
-        // Extract date ranges using locale-aware parser
-        $dateFilters = $this->extractDateFilters($query, $locale);
-        $filters = array_merge($filters, $dateFilters);
-        
-        // Extract numeric and text filters
+
+        $filters = array_merge($filters, $this->extractDateFilters($originalQuery, $locale));
         $filters = array_merge($filters, $this->extractNumericFilters($tokens, $locale));
         $filters = array_merge($filters, $this->extractTextFilters($tokens, $locale));
-        
+        $filters = array_merge($filters, $this->extractSenderFilters($originalQuery, $locale));
+        $filters = array_merge($filters, $this->extractKeywordFilters($tokens, $locale, $originalQuery));
+
+        return $filters;
+    }
+
+    private function extractKeywordFilters(array $tokens, string $locale, string $originalQuery): array
+    {
+        $filters = [];
+        $phrases = [];
+
+        if (preg_match_all('/"([^"]+)"/u', $originalQuery, $matches)) {
+            foreach ($matches[1] as $match) {
+                $phrases[] = trim($match);
+            }
+        }
+
+        if (preg_match_all("/'([^']+)'/u", $originalQuery, $matches)) {
+            foreach ($matches[1] as $match) {
+                $phrases[] = trim($match);
+            }
+        }
+
+        if (empty($phrases)) {
+            $stopWords = $this->localeManager->getStopWords($locale);
+
+            foreach ($tokens as $token) {
+                $token = trim($token);
+                $tokenLower = strtolower($token);
+
+                if ($token === '' || is_numeric($token)) {
+                    continue;
+                }
+
+                if (in_array($tokenLower, $stopWords, true)) {
+                    continue;
+                }
+
+                if ($this->vocabulary->isModel($tokenLower) ||
+                    $this->vocabulary->isField($tokenLower) ||
+                    $this->vocabulary->isAction($tokenLower) ||
+                    $this->isComparatorToken($tokenLower)) {
+                    continue;
+                }
+
+                $phrases[] = $token;
+            }
+        }
+
+        $phrases = array_slice(array_unique(array_filter($phrases)), 0, 5);
+
+        if (empty($phrases)) {
+            return $filters;
+        }
+
+        $searchableFields = ['subject', 'plain_body'];
+
+        foreach ($phrases as $phrase) {
+            foreach ($searchableFields as $field) {
+                $fieldMapping = $this->vocabulary->getFieldMapping($field);
+                $filters[] = new Filter(
+                    field: $field,
+                    operator: 'LIKE',
+                    value: '%' . $phrase . '%',
+                    mapping: $fieldMapping ? "{$fieldMapping['model']}.{$fieldMapping['field']}" : null,
+                    confidence: 0.7,
+                    locale: $locale
+                );
+            }
+        }
+
+        return $filters;
+    }
+
+    private function extractSenderFilters(string $originalQuery, string $locale): array
+    {
+        $filters = [];
+        $pattern = '/\b(?:from|sender|by)\s+(?:"([^"]+)"|\'([^\']+)\'|([^\s,]+))/i';
+
+        if (preg_match_all($pattern, $originalQuery, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $match) {
+                $value = $match[1] ?: ($match[2] ?: ($match[3] ?? ''));
+                $value = $this->sanitizeSenderValue($value);
+
+                if ($value === '') {
+                    continue;
+                }
+
+                foreach ($this->inferSenderFieldCandidates($value) as $field) {
+                    $fieldMapping = $this->vocabulary->getFieldMapping($field);
+                    $filters[] = new Filter(
+                        field: $field,
+                        operator: $this->looksLikeEmail($value) ? '=' : 'LIKE',
+                        value: $this->looksLikeEmail($value) ? $value : '%' . $value . '%',
+                        mapping: $fieldMapping ? "{$fieldMapping['model']}.{$fieldMapping['field']}" : null,
+                        confidence: 0.85,
+                        locale: $locale
+                    );
+                }
+            }
+        }
+
         return $filters;
     }
     
@@ -233,55 +373,82 @@ class MultilingualQueryParser
     private function extractDateFilters(string $query, string $locale): array
     {
         $filters = [];
-        $datePatterns = $this->localeManager->getDatePatterns($locale);
-        
-        // Use locale-aware date phrase parser
+
         $dateRange = MultilingualDatePhraseParser::parse($query, $locale);
-        
-        if ($dateRange) {
-            // Resolve actual date field from entities
-            $dateField = $this->resolveDateField($query);
-            
-            if (isset($dateRange['from']) && isset($dateRange['to'])) {
-                if ($dateRange['from'] === $dateRange['to']) {
-                    $filters[] = new Filter(
-                        field: $dateField,
-                        operator: '=',
-                        value: $dateRange['from'],
-                        mapping: null,
-                        confidence: 0.95,
-                        locale: $locale
-                    );
-                } else {
-                    $filters[] = new Filter(
-                        field: $dateField,
-                        operator: '>=',
-                        value: $dateRange['from'],
-                        mapping: null,
-                        confidence: 0.95,
-                        locale: $locale
-                    );
-                    
-                    $filters[] = new Filter(
-                        field: $dateField,
-                        operator: '<=',
-                        value: $dateRange['to'],
-                        mapping: null,
-                        confidence: 0.95,
-                        locale: $locale
-                    );
-                }
+
+        if (!$dateRange) {
+            $dateRange = $this->parseRelativeDatePhrase($query);
+        }
+
+        if ($dateRange && isset($dateRange['from'], $dateRange['to'])) {
+            $dateField = $this->resolveDateField($query, $locale);
+
+            if ($dateRange['from'] === $dateRange['to']) {
+                $filters[] = new Filter(
+                    field: $dateField,
+                    operator: '=',
+                    value: $dateRange['from'],
+                    mapping: null,
+                    confidence: 0.95,
+                    locale: $locale
+                );
+            } else {
+                $filters[] = new Filter(
+                    field: $dateField,
+                    operator: '>=',
+                    value: $dateRange['from'],
+                    mapping: null,
+                    confidence: 0.95,
+                    locale: $locale
+                );
+
+                $filters[] = new Filter(
+                    field: $dateField,
+                    operator: '<=',
+                    value: $dateRange['to'],
+                    mapping: null,
+                    confidence: 0.95,
+                    locale: $locale
+                );
             }
         }
-        
+
         return $filters;
     }
     
-    private function resolveDateField(string $query): string
+    private function parseRelativeDatePhrase(string $query): ?array
+    {
+        $pattern = '/\b(?:last|past)\s+(?<quantity>\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)?\s*(?<unit>day|week|month|year)s?\b/i';
+        if (!preg_match($pattern, $query, $matches)) {
+            return null;
+        }
+
+        $quantityToken = strtolower($matches['quantity'] ?? '');
+        $quantity = is_numeric($quantityToken)
+            ? (int) $quantityToken
+            : ($this->wordToNumber($quantityToken) ?? 1);
+
+        $unit = strtolower($matches['unit'] ?? 'day');
+
+        $end = Carbon::now()->endOfDay();
+        $start = match ($unit) {
+            'week' => $end->copy()->subWeeks($quantity)->startOfDay(),
+            'month' => $end->copy()->subMonths($quantity)->startOfDay(),
+            'year' => $end->copy()->subYears($quantity)->startOfDay(),
+            default => $end->copy()->subDays($quantity)->startOfDay(),
+        };
+
+        return [
+            'from' => $start->toDateString(),
+            'to' => $end->toDateString(),
+        ];
+    }
+    
+    private function resolveDateField(string $query, string $locale): string
     {
         // Try to extract entity from query to resolve date field
-        $tokens = $this->tokenize($query, $this->localeManager->getCurrentLocale());
-        $entities = $this->extractEntities($tokens, $this->localeManager->getCurrentLocale());
+        $tokens = $this->tokenize($query, $locale);
+        $entities = $this->extractEntities($tokens, $locale);
         
         if (!empty($entities)) {
             $entity = $entities[0];
@@ -317,6 +484,26 @@ class MultilingualQueryParser
         
         // Safe default - most Laravel models have created_at
         return 'created_at';
+    }
+
+    private function wordToNumber(string $word): ?int
+    {
+        $mapping = [
+            'one' => 1,
+            'two' => 2,
+            'three' => 3,
+            'four' => 4,
+            'five' => 5,
+            'six' => 6,
+            'seven' => 7,
+            'eight' => 8,
+            'nine' => 9,
+            'ten' => 10,
+            'eleven' => 11,
+            'twelve' => 12,
+        ];
+
+        return $mapping[$word] ?? null;
     }
     
     private function extractRelationships(array $tokens, string $locale): array
@@ -471,7 +658,7 @@ class MultilingualQueryParser
         if (preg_match('/\b(?:group\s+by|by)\s+(\w+)/i', $query, $matches)) {
             $groupBy = $matches[1];
             foreach ($aggregations as $agg) {
-                $agg->groupBy = $groupBy;
+                $agg->setGroupBy($groupBy);
             }
         }
         

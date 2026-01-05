@@ -5,14 +5,16 @@ namespace Venmail\SemanticSearch\Core;
 use Illuminate\Contracts\Cache\Repository as Cache;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Venmail\SemanticSearch\Adapters\CacheAdapter;
+use Venmail\SemanticSearch\Core\LocaleManager;
+use Venmail\SemanticSearch\Core\PendingSemanticSearch;
 use Venmail\SemanticSearch\Data\ParsedQuery;
 use Venmail\SemanticSearch\Data\ProjectMetadata;
 use Venmail\SemanticSearch\Data\SearchResult;
 use Venmail\SemanticSearch\History\QueryHistoryService;
 use Venmail\SemanticSearch\Parsing\MultilingualQueryParser;
 use Venmail\SemanticSearch\Security\PolicyGate;
-use Venmail\SemanticSearch\Core\LocaleManager;
 
 class SearchEngine
 {
@@ -46,10 +48,24 @@ class SearchEngine
         $this->historyService = $historyService;
         $this->localeManager = $localeManager;
     }
+
+    public function query(string $query): PendingSemanticSearch
+    {
+        return new PendingSemanticSearch($this, $query);
+    }
     
     public function search(string $query, array $options = []): SearchResult
     {
         $startTime = microtime(true);
+        
+        try {
+            Log::info('[SemanticSearch] Starting search', [
+                'query' => $query,
+                'options' => $options
+            ]);
+        } catch (\Throwable $e) {
+            // Ignore logging errors
+        }
         
         // Check cache first
         if (config('semantic-search.cache.enabled', true)) {
@@ -106,6 +122,9 @@ class SearchEngine
         
         // Parse query using multilingual parser or LLM result
         $locale = $options['locale'] ?? $this->localeManager->getCurrentLocale();
+        if (!$this->localeManager->isSupported($locale)) {
+            $locale = $this->localeManager->getDefaultLocale();
+        }
         
         $parsedQuery = null;
         
@@ -120,8 +139,21 @@ class SearchEngine
         
         // Fallback to standard parser
         if (!$parsedQuery) {
-            $parser = new MultilingualQueryParser($this->localeManager, $vocabulary);
-            $parsedQuery = $parser->parse($query, $locale);
+            try {
+                Log::info('[SemanticSearch] Parsing query with MultilingualQueryParser');
+                $parser = new MultilingualQueryParser($this->localeManager, $vocabulary);
+                $parsedQuery = $parser->parse($query, $locale);
+                Log::info('[SemanticSearch] Query parsed successfully', [
+                    'entities' => count($parsedQuery->getEntities()),
+                    'filters' => count($parsedQuery->getFilters())
+                ]);
+            } catch (\Throwable $e) {
+                Log::error('[SemanticSearch] Parsing failed', [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                throw $e;
+            }
             
             // Enhance parsed query with disambiguation
             if ($disambiguationResult && config('semantic-search.disambiguation.enabled', true)) {
@@ -130,17 +162,45 @@ class SearchEngine
             }
         }
         
-        // Validate query
-        $this->validateQuery($parsedQuery);
-        
-        // Authorize query (security check)
-        $user = function_exists('auth') && auth()->check() ? auth()->user() : null;
-        $this->policyGate->authorize($parsedQuery, $metadata, $user);
-        
-        // Build and execute query
+        // Validate early so we can return structured error responses
         try {
+            $this->validateQuery($parsedQuery);
+        } catch (\InvalidArgumentException $e) {
+            return new SearchResult(
+                data: [],
+                metadata: [
+                    'error' => 'Invalid query',
+                    'message' => $e->getMessage(),
+                    'query' => $query,
+                    'suggestions' => $this->generateSuggestions($query),
+                ],
+                executionTime: microtime(true) - $startTime
+            );
+        }
+        
+        // Build, authorize, and execute query
+        try {
+            
+            // Authorize query (security check)
+            $user = function_exists('auth') && auth()->check() ? auth()->user() : null;
+            $this->policyGate->authorize($parsedQuery, $metadata, $user);
+            
+            Log::info('[SemanticSearch] Building query from parsed query', [
+                'entities' => count($parsedQuery->getEntities()),
+                'filters' => count($parsedQuery->getFilters())
+            ]);
+            
             $dbQuery = $this->queryBuilder->buildQuery($parsedQuery, $metadata);
-            $result = $this->executeQuery($dbQuery, $options);
+            
+            Log::info('[SemanticSearch] Query built successfully, executing', [
+                'table_overrides' => $options['tables'] ?? null
+            ]);
+
+            if (!empty($options['tables']) && is_array($options['tables'])) {
+                $result = $this->executeAcrossTables($dbQuery, $options);
+            } else {
+                $result = $this->executeQuery($dbQuery, $options);
+            }
             
             $executionTime = microtime(true) - $startTime;
             $result->executionTime = $executionTime;
@@ -190,6 +250,60 @@ class SearchEngine
                 executionTime: microtime(true) - $startTime
             );
         }
+    }
+
+    private function executeAcrossTables(Builder $query, array $options): SearchResult
+    {
+        $tables = array_values(array_filter($options['tables'] ?? [], function ($table) {
+            return is_string($table) && trim($table) !== '';
+        }));
+
+        if (empty($tables)) {
+            return $this->executeQuery($query, $options);
+        }
+
+        $limit = $options['limit'] ?? null;
+        $offset = max(0, (int)($options['offset'] ?? 0));
+        $collected = [];
+        $targetCount = $limit !== null ? $limit + $offset : null;
+
+        foreach ($tables as $table) {
+            $tableQuery = clone $query;
+            $tableQuery->from($table);
+
+            if ($targetCount !== null) {
+                $remaining = $targetCount - count($collected);
+                if ($remaining <= 0) {
+                    break;
+                }
+                $tableQuery->limit($remaining);
+            }
+
+            $rows = $tableQuery->get()->toArray();
+
+            foreach ($rows as $row) {
+                $collected[] = $row;
+
+                if ($targetCount !== null && count($collected) >= $targetCount) {
+                    break 2;
+                }
+            }
+        }
+
+        if ($offset > 0) {
+            $collected = array_slice($collected, $offset);
+        }
+
+        if ($limit !== null) {
+            $collected = array_slice($collected, 0, $limit);
+        }
+
+        return new SearchResult(
+            data: $collected,
+            metadata: [
+                'tables' => $tables,
+            ]
+        );
     }
     
     private function validateQuery(ParsedQuery $parsedQuery): void
@@ -387,10 +501,15 @@ class SearchEngine
         return $this->historyService->getHistory($user, $limit);
     }
     
-    public function getSuggestions(string $partialQuery, int $limit = 5): array
+    public function getSuggestions(string $partialQuery, int|array $limit = 5, array $options = []): array
     {
+        if (is_array($limit)) {
+            $options = $limit;
+            $limit = 5;
+        }
+        
         $user = function_exists('auth') && auth()->check() ? auth()->user() : null;
-        return $this->historyService->getSuggestions($partialQuery, $user, $limit);
+        return $this->historyService->getSuggestions($partialQuery, $user, $limit, $options);
     }
 }
 
