@@ -409,7 +409,7 @@ This package is open-sourced software licensed under the [MIT license](LICENSE).
 
 - Laravel team for the excellent framework
 - OpenAI for LLM API
-- All contributors and early adopters
+- The Venmail team and early adopters
 
 ## 📞 Support
 
