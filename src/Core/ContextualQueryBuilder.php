@@ -422,6 +422,17 @@ class ContextualQueryBuilder
             $operator = $this->normalizeOperator($filter->getOperator());
             $value = $this->normalizeValueByType($filter->getValue(), $resolved->getType());
             
+            // Interpret empty-string sentinels (used by quantifiers) as null checks
+            if ($value === '' && in_array($operator, ['!=', '<>'], true)) {
+                $query->whereNotNull($field);
+                continue;
+            }
+
+            if ($value === '' && $operator === '=') {
+                $query->whereNull($field);
+                continue;
+            }
+
             // Use indexed field for better performance
             if ($resolved->isIndexed() && $operator === '=') {
                 // Indexed equality - most efficient

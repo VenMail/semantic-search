@@ -208,16 +208,18 @@ class FieldResolver
             );
         }
         
-        // Check model fillable/attributes
-        $fillable = $model->getFillable();
-        if (in_array($fieldName, $fillable, true) || $model->hasAttribute($fieldName)) {
-            // Field exists but might not be in schema (computed/accessor)
-            return new ResolvedField(
-                field: $fieldName,
-                type: $this->inferTypeFromModel($model, $fieldName),
-                indexed: false,
-                nullable: true
-            );
+        // If schema information is unavailable (e.g., database inspection failed), fall back to
+        // model-provided attributes as a last resort to avoid hard failures.
+        if (empty($columns)) {
+            $fillable = $model->getFillable();
+            if (in_array($fieldName, $fillable, true) || $model->hasAttribute($fieldName)) {
+                return new ResolvedField(
+                    field: $fieldName,
+                    type: $this->inferTypeFromModel($model, $fieldName),
+                    indexed: false,
+                    nullable: true
+                );
+            }
         }
         
         return null;

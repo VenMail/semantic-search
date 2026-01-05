@@ -399,6 +399,10 @@ SemanticSearch::search("count of posts by author");
 
 ## 🤝 Contributing
 
+## 📜 Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes and upgrade guidance.
+
 Contributions are welcome! Please read our contributing guidelines and submit pull requests.
 
 ## 📄 License
@@ -415,7 +419,6 @@ This package is open-sourced software licensed under the [MIT license](LICENSE).
 
 - **Documentation**: See [DEV.md](DEV.md) for development setup
 - **Issues**: [GitHub Issues](https://github.com/venmail/laravel-semantic-search/issues)
-- **Email**: support@venmail.com
 
 ---
 
