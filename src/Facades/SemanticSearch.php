@@ -13,9 +13,10 @@ use Illuminate\Support\Facades\Facade;
  * @method static array generateSuggestions(string $query)
  * @method static array validateQueryStructure(array $queryStructure)
  * @method static array getQueryExplanation(string $query)
+ * @method static array getMetrics()
+ * @method static void resetMetrics()
  *
- * @see \Venmail\SemanticSearch\Core\SearchEngine
- * @see \Venmail\SemanticSearch\Core\RobustSemanticSearchService
+ * @see \Venmail\SemanticSearch\Core\EnhancedSemanticSearchService
  */
 class SemanticSearch extends Facade
 {

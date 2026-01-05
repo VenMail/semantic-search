@@ -3,27 +3,21 @@
 namespace Venmail\SemanticSearch\Core\Fallback;
 
 use Venmail\SemanticSearch\Core\Vocabulary;
+use Venmail\SemanticSearch\Core\Config\SemanticFieldPatterns;
 use Venmail\SemanticSearch\Data\ParsedQuery;
 use Venmail\SemanticSearch\Data\Entity;
 
 class AggressiveMappingFallback
 {
     private Vocabulary $vocabulary;
-    private array $relationshipPatterns = [
-        'from' => ['sender', 'from_name', 'from_email', 'user_id'],
-        'to' => ['recipient', 'to_name', 'to_email', 'recipient_id'],
-        'by' => ['creator', 'author', 'user_id', 'created_by'],
-        'with' => ['associated', 'related', 'linked'],
-        'about' => ['subject', 'content', 'description', 'title'],
-        'in' => ['category', 'folder', 'status', 'location'],
-        'for' => ['recipient', 'target', 'purpose'],
-        'on' => ['date', 'created_at', 'updated_at', 'timestamp'],
-        'at' => ['time', 'created_at', 'updated_at', 'timestamp']
-    ];
+    private array $relationshipPatterns;
+    private array $priorityFields;
     
     public function __construct(Vocabulary $vocabulary)
     {
         $this->vocabulary = $vocabulary;
+        $this->relationshipPatterns = SemanticFieldPatterns::getRelationshipPatterns();
+        $this->priorityFields = SemanticFieldPatterns::getPrioritySearchFields();
     }
     
     public function processLowConfidenceQuery(ParsedQuery $query, float $confidence): ParsedQuery
@@ -194,12 +188,11 @@ class AggressiveMappingFallback
     {
         $fields = $this->vocabulary->getFieldsForModel($model);
         
-        // Prioritize common searchable fields
-        $priorityFields = ['subject', 'content', 'body', 'description', 'title', 'name', 'email'];
-        
-        foreach ($priorityFields as $priority) {
+        // Use priority fields from configuration
+        foreach ($this->priorityFields as $priorityField) {
+            $fieldName = $priorityField['field'];
             foreach ($fields as $field) {
-                if (str_contains(strtolower($field), $priority)) {
+                if (str_contains(strtolower($field), $fieldName)) {
                     return [$field];
                 }
             }

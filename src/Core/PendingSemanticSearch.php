@@ -9,7 +9,7 @@ use Venmail\SemanticSearch\Data\SearchResult;
 class PendingSemanticSearch
 {
     /**
-     * @var SearchEngine
+     * @var EnhancedSemanticSearchService
      */
     private $engine;
 
@@ -23,7 +23,7 @@ class PendingSemanticSearch
      */
     private $options = [];
 
-    public function __construct(SearchEngine $engine, string $query)
+    public function __construct(EnhancedSemanticSearchService $engine, string $query)
     {
         $this->engine = $engine;
         $this->query = $query;

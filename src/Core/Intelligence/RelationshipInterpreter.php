@@ -3,6 +3,7 @@
 namespace Venmail\SemanticSearch\Core\Intelligence;
 
 use Venmail\SemanticSearch\Core\Vocabulary;
+use Venmail\SemanticSearch\Core\Config\SemanticFieldPatterns;
 use Venmail\SemanticSearch\Data\ParsedQuery;
 
 class RelationshipInterpreter
@@ -19,88 +20,14 @@ class RelationshipInterpreter
     
     private function initializeMappings(): void
     {
-        $this->relationshipMappings = [
-            // Direct relationships
-            'from' => [
-                'semantic' => 'sender',
-                'field_patterns' => ['from', 'sender', 'author', 'creator', 'user_id'],
-                'inverse' => 'to'
-            ],
-            'to' => [
-                'semantic' => 'recipient',
-                'field_patterns' => ['to', 'recipient', 'receiver', 'target'],
-                'inverse' => 'from'
-            ],
-            'by' => [
-                'semantic' => 'creator',
-                'field_patterns' => ['by', 'creator', 'author', 'user_id', 'created_by'],
-                'inverse' => null
-            ],
-            'with' => [
-                'semantic' => 'associated',
-                'field_patterns' => ['with', 'associated', 'related', 'linked', 'connected'],
-                'inverse' => 'with'
-            ],
-            'about' => [
-                'semantic' => 'subject',
-                'field_patterns' => ['about', 'subject', 'content', 'description', 'title', 'topic'],
-                'inverse' => null
-            ],
-            'in' => [
-                'semantic' => 'container',
-                'field_patterns' => ['in', 'category', 'folder', 'status', 'location', 'group'],
-                'inverse' => null
-            ],
-            'for' => [
-                'semantic' => 'purpose',
-                'field_patterns' => ['for', 'purpose', 'target', 'intended', 'recipient'],
-                'inverse' => null
-            ],
-            'on' => [
-                'semantic' => 'date',
-                'field_patterns' => ['on', 'date', 'created_at', 'updated_at', 'timestamp', 'time'],
-                'inverse' => null
-            ],
-            'at' => [
-                'semantic' => 'time',
-                'field_patterns' => ['at', 'time', 'created_at', 'updated_at', 'timestamp', 'hour'],
-                'inverse' => null
-            ],
-            'during' => [
-                'semantic' => 'period',
-                'field_patterns' => ['during', 'period', 'range', 'between', 'within'],
-                'inverse' => null
-            ],
-            'before' => [
-                'semantic' => 'prior',
-                'field_patterns' => ['before', 'prior', 'previous', 'earlier', '<'],
-                'inverse' => 'after'
-            ],
-            'after' => [
-                'semantic' => 'subsequent',
-                'field_patterns' => ['after', 'subsequent', 'later', '>', 'following'],
-                'inverse' => 'before'
-            ],
-            'since' => [
-                'semantic' => 'from_date',
-                'field_patterns' => ['since', 'from_date', 'start_date', '>='],
-                'inverse' => 'until'
-            ],
-            'until' => [
-                'semantic' => 'to_date',
-                'field_patterns' => ['until', 'to_date', 'end_date', '<='],
-                'inverse' => 'since'
-            ]
-        ];
+        $this->relationshipMappings = SemanticFieldPatterns::getRelationshipPatterns();
         
-        $this->fieldMappings = [
-            'email' => ['email', 'email_address', 'mail', 'address'],
-            'name' => ['name', 'full_name', 'display_name', 'title'],
-            'date' => ['date', 'created_at', 'updated_at', 'timestamp', 'time'],
-            'id' => ['id', 'user_id', 'identifier', 'key'],
-            'content' => ['content', 'body', 'message', 'text', 'description'],
-            'subject' => ['subject', 'title', 'heading', 'topic']
-        ];
+        // Build field mappings from patterns
+        $this->fieldMappings = [];
+        $patterns = SemanticFieldPatterns::getCommonFieldPatterns();
+        foreach ($patterns as $type => $config) {
+            $this->fieldMappings[$type] = $config['patterns'];
+        }
     }
     
     public function interpretRelationships(ParsedQuery $query): ParsedQuery
