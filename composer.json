@@ -1,6 +1,6 @@
 {
   "name": "venmail/laravel-semantic-search",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Laravel semantic search package with static code analysis and context-aware query building.",
   "type": "library",
   "license": "MIT",
@@ -25,12 +25,12 @@
   },
   "autoload": {
     "psr-4": {
-      "Venmail\\\\SemanticSearch\\\\": "src/"
+      "Venmail\\SemanticSearch\\": "src/"
     }
   },
   "autoload-dev": {
     "psr-4": {
-      "Venmail\\\\SemanticSearch\\\\Tests\\\\": "tests/"
+      "Venmail\\SemanticSearch\\Tests\\": "tests/"
     }
   },
   "require-dev": {
@@ -40,7 +40,7 @@
   "extra": {
     "laravel": {
       "providers": [
-        "Venmail\\\\SemanticSearch\\\\SemanticSearchServiceProvider"
+        "Venmail\\SemanticSearch\\SemanticSearchServiceProvider"
       ]
     }
   },
