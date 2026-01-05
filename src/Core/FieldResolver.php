@@ -11,11 +11,15 @@ class FieldResolver
 {
     private SchemaAnalyzer $schemaAnalyzer;
     private ProjectMetadata $metadata;
+    private array $fieldOverrides = [];
+    private array $accessorFieldCache = [];
+    private array $methodSourceCache = [];
     
     public function __construct(SchemaAnalyzer $schemaAnalyzer, ProjectMetadata $metadata)
     {
         $this->schemaAnalyzer = $schemaAnalyzer;
         $this->metadata = $metadata;
+        $this->fieldOverrides = config('semantic-search.field_overrides', []);
     }
     
     /**
@@ -25,6 +29,13 @@ class FieldResolver
     {
         $modelClass = get_class($model);
         $requestedField = $filter->getField();
+        $overrideField = $this->getFieldOverride($modelClass, $requestedField);
+        if ($overrideField) {
+            $resolved = $this->resolveFieldName($overrideField, $model);
+            if ($resolved) {
+                return $resolved;
+            }
+        }
         
         // Try mapping first
         $mapping = $filter->getMapping();
@@ -40,6 +51,12 @@ class FieldResolver
         
         // Try direct field name
         $resolved = $this->resolveFieldName($requestedField, $model);
+        if ($resolved) {
+            return $resolved;
+        }
+
+        // Try to infer accessor backing column
+        $resolved = $this->resolveAccessorColumn($requestedField, $model);
         if ($resolved) {
             return $resolved;
         }
@@ -60,6 +77,108 @@ class FieldResolver
         }
         
         return null;
+    }
+
+    private function getFieldOverride(string $modelClass, string $field): ?string
+    {
+        if (empty($this->fieldOverrides[$modelClass])) {
+            return null;
+        }
+
+        return $this->fieldOverrides[$modelClass][$field] ?? null;
+    }
+
+    private function resolveAccessorColumn(string $fieldName, Model $model): ?ResolvedField
+    {
+        $modelClass = get_class($model);
+        $cacheKey = "{$modelClass}:{$fieldName}";
+        if (array_key_exists($cacheKey, $this->accessorFieldCache)) {
+            return $this->accessorFieldCache[$cacheKey];
+        }
+
+        $methodName = 'get' . Str::studly($fieldName) . 'Attribute';
+        if (!method_exists($model, $methodName)) {
+            return $this->accessorFieldCache[$cacheKey] = null;
+        }
+
+        try {
+            $method = new \ReflectionMethod($model, $methodName);
+        } catch (\ReflectionException $e) {
+            return $this->accessorFieldCache[$cacheKey] = null;
+        }
+
+        $source = $this->getMethodSource($method);
+        if ($source === null) {
+            return $this->accessorFieldCache[$cacheKey] = null;
+        }
+
+        $schema = $this->schemaAnalyzer->getModelSchema($modelClass);
+        $columns = $schema['columns'] ?? [];
+        $candidates = $this->extractReturnColumnCandidates($source);
+
+        foreach ($candidates as $candidate) {
+            if (!isset($columns[$candidate])) {
+                continue;
+            }
+
+            $resolved = new ResolvedField(
+                field: $candidate,
+                type: $columns[$candidate]['type'] ?? 'string',
+                indexed: $this->schemaAnalyzer->isColumnIndexed($modelClass, $candidate),
+                nullable: $columns[$candidate]['nullable'] ?? false
+            );
+
+            return $this->accessorFieldCache[$cacheKey] = $resolved;
+        }
+
+        return $this->accessorFieldCache[$cacheKey] = null;
+    }
+
+    private function getMethodSource(\ReflectionMethod $method): ?string
+    {
+        $file = $method->getFileName();
+        if (!$file || !is_readable($file)) {
+            return null;
+        }
+
+        if (!isset($this->methodSourceCache[$file])) {
+            $this->methodSourceCache[$file] = file($file);
+        }
+
+        $lines = $this->methodSourceCache[$file];
+        $start = $method->getStartLine();
+        $end = $method->getEndLine();
+        $length = max(0, $end - $start + 1);
+
+        if ($length === 0) {
+            return null;
+        }
+
+        $snippet = array_slice($lines, $start - 1, $length);
+        return implode('', $snippet);
+    }
+
+    private function extractReturnColumnCandidates(string $source): array
+    {
+        $candidates = [];
+
+        if (preg_match_all('/return\s+(.*?);/s', $source, $returns)) {
+            foreach ($returns[1] as $expr) {
+                if (preg_match_all("/\$this->attributes\\[['\"]([A-Za-z0-9_]+)['\"]\\]/", $expr, $attrMatches)) {
+                    foreach ($attrMatches[1] as $attr) {
+                        $candidates[] = $attr;
+                    }
+                }
+
+                if (preg_match_all('/\$this->([A-Za-z0-9_]+)/', $expr, $propMatches)) {
+                    foreach ($propMatches[1] as $prop) {
+                        $candidates[] = Str::snake($prop);
+                    }
+                }
+            }
+        }
+
+        return array_values(array_unique($candidates));
     }
     
     private function resolveFieldName(string $fieldName, Model $model): ?ResolvedField

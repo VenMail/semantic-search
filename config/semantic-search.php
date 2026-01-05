@@ -61,6 +61,25 @@ return [
         'auto_detect' => env('SEMANTIC_SEARCH_AUTO_DETECT_LOCALE', true),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Field Overrides
+    |--------------------------------------------------------------------------
+    |
+    | Some Eloquent attributes (like accessors/computed properties) do not
+    | exist as real database columns. Configure overrides here so semantic
+    | search knows which physical column should be queried when a virtual
+    | attribute is referenced.
+    |
+    | Example:
+    | 'field_overrides' => [
+    |     App\Models\Mail::class => [
+    |         'contents' => 'plain_body',
+    |     ],
+    | ],
+    */
+    'field_overrides' => [],
+
     'history' => [
         'enabled' => env('SEMANTIC_SEARCH_HISTORY_ENABLED', true),
         'max_entries' => env('SEMANTIC_SEARCH_HISTORY_MAX_ENTRIES', 50),

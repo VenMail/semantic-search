@@ -1,6 +1,6 @@
 {
   "name": "venmail/laravel-semantic-search",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Laravel semantic search package with static code analysis and context-aware query building.",
   "type": "library",
   "license": "MIT",

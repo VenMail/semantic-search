@@ -131,19 +131,19 @@ class ContextualQueryBuilder
                 return (bool)$value;
             case 'date':
             case 'datetime':
-            case 'timestamp':
                 // Already normalized by DatePhraseParser
                 return $value;
             default:
                 return $value;
         }
     }
-    
     private function groupDateFilters(array $filters, Model $model = null, ?ResolvedField $resolvedField = null): array
     {
         $dateRange = [];
         $timeRange = [];
         
+        // Add a new variable to store the original filter values
+        $originalFilters = $filters;
         foreach ($filters as $filter) {
             $field = $filter->getField();
             $operator = $filter->getOperator();
@@ -369,7 +369,6 @@ class ContextualQueryBuilder
             }
         }
     }
-    
     private function applyFilterGroup(Builder $query, string $field, array $group, Model $model): void
     {
         $resolved = $group['resolved'];
@@ -453,7 +452,6 @@ class ContextualQueryBuilder
                 }
             }
         }
-    }
     }
     
     private function normalizeOperator(string $operator): string
