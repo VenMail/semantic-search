@@ -152,9 +152,21 @@ class MultilingualDatePhraseParser
                 }
             } elseif (is_array($pattern) && isset($pattern['regex'])) {
                 if (preg_match($pattern['regex'], $normalized, $matches)) {
-                    $days = (int)($matches[1] ?? 0);
+                    $quantity = (int)($matches[1] ?? 0);
+                    $unit = strtolower($pattern['unit'] ?? 'days');
+                    
+                    $from = match ($unit) {
+                        'week',
+                        'weeks' => Carbon::today()->copy()->subWeeks(max(1, $quantity)),
+                        'month',
+                        'months' => Carbon::today()->copy()->subMonths(max(1, $quantity)),
+                        'year',
+                        'years' => Carbon::today()->copy()->subYears(max(1, $quantity)),
+                        default => Carbon::today()->copy()->subDays(max(1, $quantity)),
+                    };
+                    
                     return [
-                        'from' => Carbon::today()->subDays($days)->toDateString(),
+                        'from' => $from->toDateString(),
                         'to' => Carbon::today()->toDateString()
                     ];
                 }

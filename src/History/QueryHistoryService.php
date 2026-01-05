@@ -59,7 +59,7 @@ class QueryHistoryService
     /**
      * Get query suggestions based on partial query
      */
-    public function getSuggestions(string $partialQuery, ?Authenticatable $user = null, int $limit = 5): array
+    public function getSuggestions(string $partialQuery, ?Authenticatable $user = null, int $limit = 5, array $options = []): array
     {
         if (!$user || mb_strlen($partialQuery) < 2) {
             return [];

@@ -10,6 +10,10 @@ use Venmail\SemanticSearch\Core\DynamicVocabularyBuilder;
 use Venmail\SemanticSearch\Core\LocaleManager;
 use Venmail\SemanticSearch\Core\ProjectAnalyzer;
 use Venmail\SemanticSearch\Core\SearchEngine;
+use Venmail\SemanticSearch\Core\Validation\SQLStructureValidator;
+use Venmail\SemanticSearch\Core\Fallback\AggressiveMappingFallback;
+use Venmail\SemanticSearch\Core\Intelligence\RelationshipInterpreter;
+use Venmail\SemanticSearch\Core\RobustSemanticSearchService;
 
 class SemanticSearchServiceProvider extends ServiceProvider
 {
@@ -84,6 +88,33 @@ class SemanticSearchServiceProvider extends ServiceProvider
                 $app->make(\Venmail\SemanticSearch\Disambiguation\ContextAnalyzer::class),
                 $app->make(\Venmail\SemanticSearch\Disambiguation\SlangMemoryService::class),
                 $vocabulary
+            );
+        });
+
+        // Register Robust Semantic Search components
+        $this->app->singleton(SQLStructureValidator::class, function ($app) {
+            $vocabulary = $app->make(\Venmail\SemanticSearch\Core\Vocabulary::class);
+            return new SQLStructureValidator($vocabulary);
+        });
+
+        $this->app->singleton(AggressiveMappingFallback::class, function ($app) {
+            $vocabulary = $app->make(\Venmail\SemanticSearch\Core\Vocabulary::class);
+            return new AggressiveMappingFallback($vocabulary);
+        });
+
+        $this->app->singleton(RelationshipInterpreter::class, function ($app) {
+            $vocabulary = $app->make(\Venmail\SemanticSearch\Core\Vocabulary::class);
+            return new RelationshipInterpreter($vocabulary);
+        });
+
+        $this->app->singleton(RobustSemanticSearchService::class, function ($app) {
+            return new RobustSemanticSearchService(
+                $app->make(\Venmail\SemanticSearch\Core\Vocabulary::class),
+                $app->make(SQLStructureValidator::class),
+                $app->make(AggressiveMappingFallback::class),
+                $app->make(RelationshipInterpreter::class),
+                $app->make(\Venmail\SemanticSearch\Disambiguation\DisambiguationPipeline::class),
+                $app->make(\Venmail\SemanticSearch\Parsing\MultilingualQueryParser::class)
             );
         });
 

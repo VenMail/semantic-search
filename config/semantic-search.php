@@ -47,7 +47,7 @@ return [
 
     'disambiguation' => [
         'enabled' => env('SEMANTIC_SEARCH_DISAMBIGUATION_ENABLED', true),
-        'confidence_threshold' => env('SEMANTIC_SEARCH_DISAMBIGUATION_CONFIDENCE', 0.6),
+        'confidence_threshold' => env('SEMANTIC_SEARCH_DISAMBIGUATION_CONFIDENCE', 0.4), // Lowered from 0.6
         'spelling_correction' => [
             'enabled' => true,
             'max_distance' => env('SEMANTIC_SEARCH_SPELLING_MAX_DISTANCE', 2),

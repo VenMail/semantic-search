@@ -129,6 +129,26 @@ class Vocabulary
     {
         return array_keys($this->actionMappings);
     }
+    
+    public function getModelClass(string $model): ?string
+    {
+        $mapping = $this->modelMappings[strtolower($model)] ?? null;
+        return $mapping ? $mapping['class'] : null;
+    }
+    
+    public function getFieldsForModel(string $model): array
+    {
+        $fields = [];
+        $prefix = strtolower($model) . '.';
+        
+        foreach ($this->fieldMappings as $key => $mapping) {
+            if (str_starts_with($key, $prefix)) {
+                $fields[] = $mapping['field'];
+            }
+        }
+        
+        return $fields;
+    }
 }
 
 

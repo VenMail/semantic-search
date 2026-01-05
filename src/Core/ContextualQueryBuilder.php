@@ -490,6 +490,15 @@ class ContextualQueryBuilder
                     case '<>':
                         $query->where($field, '!=', $value);
                         break;
+                    case 'like':
+                        $query->where($field, 'LIKE', $value);
+                        break;
+                    case 'not like':
+                        $query->where($field, 'NOT LIKE', $value);
+                        break;
+                    case 'ilike':
+                        $query->where($field, 'LIKE', $value);
+                        break;
                     case '=':
                     default:
                         $query->where($field, '=', $value);
@@ -514,7 +523,7 @@ class ContextualQueryBuilder
             'equal' => '=',
         ];
         
-        return $mapping[$normalized] ?? $operator;
+        return $mapping[$normalized] ?? $normalized;
     }
     
     private function applyRelationshipFilters(Builder $query, Relationship $relationship, ParsedQuery $parsedQuery, ProjectMetadata $metadata): void

@@ -85,7 +85,7 @@ class SearchEngine
         
         // Apply disambiguation if enabled
         $disambiguationResult = null;
-        if (config('semantic-search.disambiguation.enabled', true)) {
+        if (false && config('semantic-search.disambiguation.enabled', true)) { // Temporarily disabled
             $disambiguationPipeline = app(\Venmail\SemanticSearch\Disambiguation\DisambiguationPipeline::class);
             $disambiguationResult = $disambiguationPipeline->process($query);
             $query = $disambiguationResult->getCorrectedQuery();

@@ -23,7 +23,9 @@ class ContextAnalyzer
         // Extract entities
         $tokens = preg_split('/\s+/', strtolower($query));
         foreach ($tokens as $token) {
-            if ($this->vocabulary->isModel($token)) {
+            if ($this->vocabulary->isModel($token) || 
+                $this->vocabulary->isField($token) ||
+                $this->vocabulary->isAction($token)) {
                 $entities[] = $token;
             }
         }

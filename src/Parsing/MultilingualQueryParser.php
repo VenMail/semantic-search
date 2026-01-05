@@ -18,6 +18,7 @@ class MultilingualQueryParser
     private LocaleManager $localeManager;
     private Vocabulary $vocabulary;
     private array $comparators;
+    private array $keywordExclusions = [];
     
     public function __construct(LocaleManager $localeManager, Vocabulary $vocabulary)
     {
@@ -37,14 +38,11 @@ class MultilingualQueryParser
 
     private function inferSenderFieldCandidates(string $value): array
     {
-        $candidates = ['sender_email', 'from_email', 'email', 'from'];
-
-        if (!$this->looksLikeEmail($value)) {
-            array_unshift($candidates, 'sender_name');
-            $candidates[] = 'display_name';
+        if ($this->looksLikeEmail($value)) {
+            return ['sender_email'];
         }
 
-        return array_values(array_unique($candidates));
+        return ['sender_name'];
     }
 
     private function looksLikeEmail(string $value): bool
@@ -76,6 +74,8 @@ class MultilingualQueryParser
         if (!$this->localeManager->isSupported($locale)) {
             throw new \InvalidArgumentException("Locale '{$locale}' is not supported");
         }
+        
+        $this->keywordExclusions = [];
         
         $tokens = $this->tokenize($query, $locale);
         $entities = $this->extractEntities($tokens, $locale);
@@ -180,13 +180,21 @@ class MultilingualQueryParser
 
         if (preg_match_all('/"([^"]+)"/u', $originalQuery, $matches)) {
             foreach ($matches[1] as $match) {
-                $phrases[] = trim($match);
+                $candidate = trim($match);
+                if ($candidate === '' || $this->shouldExcludeKeyword($candidate)) {
+                    continue;
+                }
+                $phrases[] = $candidate;
             }
         }
 
         if (preg_match_all("/'([^']+)'/u", $originalQuery, $matches)) {
             foreach ($matches[1] as $match) {
-                $phrases[] = trim($match);
+                $candidate = trim($match);
+                if ($candidate === '' || $this->shouldExcludeKeyword($candidate)) {
+                    continue;
+                }
+                $phrases[] = $candidate;
             }
         }
 
@@ -202,6 +210,10 @@ class MultilingualQueryParser
                 }
 
                 if (in_array($tokenLower, $stopWords, true)) {
+                    continue;
+                }
+                
+                if ($this->shouldExcludeKeyword($tokenLower)) {
                     continue;
                 }
 
@@ -254,6 +266,8 @@ class MultilingualQueryParser
                 if ($value === '') {
                     continue;
                 }
+                
+                $this->addKeywordExclusion($value);
 
                 foreach ($this->inferSenderFieldCandidates($value) as $field) {
                     $fieldMapping = $this->vocabulary->getFieldMapping($field);
@@ -374,10 +388,13 @@ class MultilingualQueryParser
     {
         $filters = [];
 
-        $dateRange = MultilingualDatePhraseParser::parse($query, $locale);
+        $dateRange = $this->parseRelativeDatePhrase($query);
 
         if (!$dateRange) {
-            $dateRange = $this->parseRelativeDatePhrase($query);
+            $dateRange = MultilingualDatePhraseParser::parse($query, $locale);
+            if ($dateRange) {
+                $this->excludeRelativeDateKeywords($query);
+            }
         }
 
         if ($dateRange && isset($dateRange['from'], $dateRange['to'])) {
@@ -418,10 +435,12 @@ class MultilingualQueryParser
     
     private function parseRelativeDatePhrase(string $query): ?array
     {
-        $pattern = '/\b(?:last|past)\s+(?<quantity>\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)?\s*(?<unit>day|week|month|year)s?\b/i';
+        $pattern = '/\b(?<modifier>last|past)\s+(?<quantity>\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)?\s*(?<unit>day|week|month|year)s?\b/i';
         if (!preg_match($pattern, $query, $matches)) {
             return null;
         }
+
+        $this->recordRelativeDateKeywordMatches($matches);
 
         $quantityToken = strtolower($matches['quantity'] ?? '');
         $quantity = is_numeric($quantityToken)
@@ -438,10 +457,38 @@ class MultilingualQueryParser
             default => $end->copy()->subDays($quantity)->startOfDay(),
         };
 
-        return [
+        $result = [
             'from' => $start->toDateString(),
             'to' => $end->toDateString(),
         ];
+        
+        return $result;
+    }
+    
+    private function excludeRelativeDateKeywords(string $query): void
+    {
+        $pattern = '/\b(?<modifier>last|past)\s+(?<quantity>\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)?\s*(?<unit>day|week|month|year)s?\b/i';
+        if (preg_match($pattern, $query, $matches)) {
+            $this->recordRelativeDateKeywordMatches($matches);
+        }
+    }
+    
+    private function recordRelativeDateKeywordMatches(array $matches): void
+    {
+        if (!empty($matches['modifier'])) {
+            $this->addKeywordExclusion($matches['modifier']);
+        }
+        if (!empty($matches['quantity'])) {
+            $this->addKeywordExclusion($matches['quantity']);
+        }
+        if (!empty($matches['unit'])) {
+            $unit = strtolower($matches['unit']);
+            $this->addKeywordExclusion($unit . 's');
+            $this->addKeywordExclusion($unit);
+        }
+        if (!empty($matches[0])) {
+            $this->addKeywordExclusion($matches[0]);
+        }
     }
     
     private function resolveDateField(string $query, string $locale): string
@@ -484,6 +531,31 @@ class MultilingualQueryParser
         
         // Safe default - most Laravel models have created_at
         return 'created_at';
+    }
+    
+    private function addKeywordExclusion(string $value): void
+    {
+        $parts = preg_split('/[\s,]+/u', mb_strtolower(trim($value)));
+        foreach ($parts as $part) {
+            if ($part === '') {
+                continue;
+            }
+            $this->keywordExclusions[$part] = true;
+        }
+    }
+    
+    private function shouldExcludeKeyword(string $value): bool
+    {
+        $value = mb_strtolower(trim($value));
+        if ($value === '') {
+            return true;
+        }
+        
+        if (isset($this->keywordExclusions[$value])) {
+            return true;
+        }
+        
+        return false;
     }
 
     private function wordToNumber(string $word): ?int

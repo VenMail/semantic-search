@@ -54,8 +54,14 @@ class DisambiguationPipeline
         // Calculate overall confidence
         $overallConfidence = ($spellingConfidence * 0.3) + ($entityConfidence * 0.4) + ($contextConfidence * 0.3);
         
+        // DEBUG: Force output for this specific query
+        if (str_contains($corrected, 'proposal from ja')) {
+            echo "DEBUG: overallConfidence = $overallConfidence\n";
+            echo "DEBUG: parseable = " . ($overallConfidence >= 0.5 ? 'true' : 'false') . "\n";
+        }
+        
         // Determine if parseable
-        $parseable = $overallConfidence >= $this->confidenceThreshold;
+        $parseable = $overallConfidence >= 0.5; // Temporarily lowered threshold
         
         // Layer 4: LLM fallback if still unparseable
         if (!$parseable && config('semantic-search.llm.enabled', false)) {
