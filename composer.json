@@ -1,6 +1,6 @@
 {
   "name": "venmail/laravel-semantic-search",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Laravel semantic search package with static code analysis and context-aware query building.",
   "type": "library",
   "license": "MIT",
@@ -16,11 +16,11 @@
   ],
   "require": {
     "php": "^8.1",
-    "illuminate/support": "^9.0|^10.0|^11.0",
-    "illuminate/cache": "^9.0|^10.0|^11.0",
-    "illuminate/database": "^9.0|^10.0|^11.0",
-    "symfony/finder": "^5.4|^6.0|^7.0",
-    "symfony/string": "^5.4|^6.0|^7.0",
+    "illuminate/support": "^9.0|^10.0|^11.0|^12.0",
+    "illuminate/cache": "^9.0|^10.0|^11.0|^12.0",
+    "illuminate/database": "^9.0|^10.0|^11.0|^12.0",
+    "symfony/finder": "^5.4|^6.0|^7.0|^8.0",
+    "symfony/string": "^5.4|^6.0|^7.0|^8.0",
     "nesbot/carbon": "^2.0|^3.0"
   },
   "autoload": {
